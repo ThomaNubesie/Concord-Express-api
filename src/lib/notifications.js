@@ -1,0 +1,340 @@
+const supabase = require('../lib/supabase');
+
+// ── Send a notification ───────────────────────────────────────────────────────
+// Saves to DB + sends FCM push if user has a token
+
+async function sendNotification({
+  userId,
+  category,   // trips | messages | payments | system
+  title,
+  body,
+  icon        = '🔔',
+  isUrgent    = false,
+  actionUrl   = null,
+  relatedId   = null,
+}) {
+  try {
+    // 1. Save to notifications table
+    const { data: notif, error } = await supabase
+      .from('notifications')
+      .insert({
+        user_id:    userId,
+        category,
+        title,
+        body,
+        icon,
+        is_urgent:  isUrgent,
+        action_url: actionUrl,
+        related_id: relatedId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[Notifications] DB insert error:', error);
+      return null;
+    }
+
+    // 2. Get user's FCM token
+    const { data: user } = await supabase
+      .from('users')
+      .select('fcm_token')
+      .eq('id', userId)
+      .single();
+
+    if (user?.fcm_token) {
+      await sendFCMPush({
+        token:   user.fcm_token,
+        title,
+        body,
+        data: {
+          notificationId: notif.id,
+          category,
+          actionUrl:      actionUrl ?? '',
+          relatedId:      relatedId ?? '',
+        },
+      });
+    }
+
+    return notif;
+  } catch (err) {
+    console.error('[Notifications] Error:', err);
+    return null;
+  }
+}
+
+// ── FCM push via Firebase Admin SDK ──────────────────────────────────────────
+
+async function sendFCMPush({ token, title, body, data = {} }) {
+  try {
+    // Firebase Admin SDK — initialized lazily to avoid startup errors
+    // if Firebase env vars aren't set yet
+    const admin = require('../lib/firebase');
+    await admin.messaging().send({
+      token,
+      notification: { title, body },
+      data:         Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v)])
+      ),
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          sound:       'default',
+          channelId:   'concord_xpress',
+        },
+      },
+    });
+  } catch (err) {
+    // FCM errors are non-fatal — notification is already in DB
+    console.error('[FCM] Push failed (non-fatal):', err.message);
+  }
+}
+
+// ── Notification templates ────────────────────────────────────────────────────
+// All the trigger points from our notification map
+
+const Notif = {
+
+  // ── Driver receives ───────────────────────────────────────────────────────
+
+  newBooking: (driverId, passengerName, fromCity, toCity, stop, time, amount) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '✅',
+      title:     `New Booking — ${passengerName}`,
+      body:      `${passengerName} booked a seat on your ${fromCity} → ${toCity} trip. Boards at ${stop} · ${time} · C$${amount} held in escrow.`,
+      actionUrl: '/driver/home',
+    }),
+
+  bookingCancelled: (driverId, passengerName, fromCity, toCity, time) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '✕',
+      title:     `Booking Cancelled — ${passengerName}`,
+      body:      `${passengerName} cancelled their seat on ${fromCity} → ${toCity} · ${time}. 1 seat is now available again.`,
+      actionUrl: '/driver/my-trips',
+    }),
+
+  passengerMessage: (driverId, passengerName, preview, bookingId) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'messages',
+      icon:      '💬',
+      title:     `Message from ${passengerName}`,
+      body:      `"${preview}"`,
+      isUrgent:  true,
+      actionUrl: '/chat',
+      relatedId: bookingId,
+    }),
+
+  paymentReleased: (driverId, amount, fromCity, toCity) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'payments',
+      icon:      '💰',
+      title:     `Payment Released — C$${amount}`,
+      body:      `All passengers confirmed arrival. C$${amount} has been released to your account.`,
+      actionUrl: '/driver/analytics',
+    }),
+
+  newRating: (driverId, passengerName, stars) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '⭐',
+      title:     `New Rating — ${stars} Stars`,
+      body:      `${passengerName} left you a ${stars}-star rating.`,
+      actionUrl: '/driver-profile',
+    }),
+
+  agreementSigned: (driverId, passengerName, fromCity, toCity) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '✍️',
+      title:     `Agreement Signed — ${passengerName}`,
+      body:      `${passengerName} accepted your Passenger Agreement for ${fromCity} → ${toCity}. Booking confirmed.`,
+      actionUrl: '/driver/my-trips',
+    }),
+
+  noShow: (driverId, passengerName, stop) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '🚫',
+      title:     `No-Show — ${passengerName}`,
+      body:      `${passengerName} did not board at ${stop}. No refund has been issued.`,
+      actionUrl: '/driver/my-trips',
+    }),
+
+  disputeOpened: (driverId, passengerName) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '⚠️',
+      title:     `Dispute Opened — ${passengerName}`,
+      body:      `${passengerName} opened a dispute. Our support team will contact you within 1 hour.`,
+      isUrgent:  true,
+      actionUrl: '/dispute',
+    }),
+
+  bookingsClosed: (driverId, fromCity, toCity, passengerCount) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'system',
+      icon:      '🔒',
+      title:     `Bookings Closed — ${fromCity} → ${toCity}`,
+      body:      `10 minutes to departure. ${passengerCount} passengers confirmed.`,
+      actionUrl: '/driver/home',
+    }),
+
+  payoutDeposited: (driverId, amount) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'payments',
+      icon:      '🏦',
+      title:     `Payout Deposited — C$${amount}`,
+      body:      `C$${amount} has been deposited to your bank account. Allow 1–3 business days.`,
+      actionUrl: '/driver/payout',
+    }),
+
+  strikeAdded: (driverId, count) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'system',
+      icon:      '⚠️',
+      title:     `Strike Warning — ${count} of 10`,
+      body:      `A cancellation strike has been added to your account (${count}/10). ${10 - count} strikes remain before suspension.`,
+      actionUrl: '/loyalty',
+      isUrgent:  count >= 8,
+    }),
+
+  documentApproved: (driverId, docType) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'system',
+      icon:      '✅',
+      title:     `Document Approved — ${docType}`,
+      body:      `Your ${docType} has been verified successfully.`,
+    }),
+
+  documentRejected: (driverId, docType, reason) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'system',
+      icon:      '❌',
+      title:     `Document Rejected — ${docType}`,
+      body:      `Your ${docType} was rejected: ${reason}. Please re-upload.`,
+      actionUrl: '/driver-verification',
+      isUrgent:  true,
+    }),
+
+  // ── Passenger receives ────────────────────────────────────────────────────
+
+  driverApproaching: (passengerId, driverName, stop, etaMins) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '🚗',
+      title:     `${driverName} is approaching!`,
+      body:      `Be ready at ${stop}. ETA ${etaMins} minutes.`,
+      isUrgent:  true,
+      actionUrl: '/trip-tracking',
+    }),
+
+  driverMessage: (passengerId, driverName, preview, bookingId) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'messages',
+      icon:      '💬',
+      title:     `Message from ${driverName}`,
+      body:      `"${preview}"`,
+      actionUrl: '/chat',
+      relatedId: bookingId,
+    }),
+
+  bookingConfirmed: (passengerId, driverName, fromCity, toCity, date, time, amount) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '✅',
+      title:     `Booking Confirmed`,
+      body:      `Your seat is confirmed with ${driverName} for ${fromCity} → ${toCity} on ${date} at ${time}. C$${amount} held in escrow.`,
+      actionUrl: '/passenger/home',
+    }),
+
+  tripUpdated: (passengerId, driverName, changeDescription) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '⚠️',
+      title:     `Trip Updated by Driver`,
+      body:      `${driverName} updated your trip: ${changeDescription}. You may cancel for a full refund.`,
+      actionUrl: '/passenger/home',
+    }),
+
+  tripCancelledByDriver: (passengerId, driverName, fromCity, toCity, refundAmount) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '✕',
+      title:     `Trip Cancelled by Driver`,
+      body:      `${driverName} cancelled the ${fromCity} → ${toCity} trip. Full refund of C$${refundAmount} will appear in 3–5 business days.`,
+      actionUrl: '/search',
+    }),
+
+  escrowReleased: (passengerId, driverName, amount) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'payments',
+      icon:      '🔒',
+      title:     `Payment Released`,
+      body:      `C$${amount} released to ${driverName}. Thank you for confirming arrival!`,
+      actionUrl: '/passenger/home',
+    }),
+
+  rateYourDriver: (passengerId, driverName, bookingId) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '⭐',
+      title:     `Rate Your Driver`,
+      body:      `How was your ride with ${driverName}? You have 48 hours to leave a rating.`,
+      actionUrl: '/rating',
+      relatedId: bookingId,
+    }),
+
+  departureReminder: (passengerId, driverName, stop, time) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '⏰',
+      title:     `Departure Tomorrow — Be Ready`,
+      body:      `Reminder: your trip with ${driverName} departs tomorrow. Your pickup is ${stop} at ${time}. Please be 5 minutes early.`,
+      actionUrl: '/passenger/home',
+    }),
+
+  loyaltyMilestone: (passengerId, trips, creditAmount) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'payments',
+      icon:      '🎉',
+      title:     `Loyalty Milestone — ${trips} Trips!`,
+      body:      creditAmount > 0
+        ? `You've completed ${trips} trips! A C$${creditAmount} loyalty credit has been added to your account.`
+        : `You've completed ${trips} trips! A monthly draw entry has been added.`,
+      actionUrl: '/loyalty',
+    }),
+};
+
+module.exports = { sendNotification, Notif };
