@@ -42,7 +42,7 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message || 'Internal server error' }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log('🍁 Concord Xpress API running on port ' + PORT);
   console.log('   Environment: ' + process.env.NODE_ENV);
   console.log('   Supabase:    ' + process.env.SUPABASE_URL);
