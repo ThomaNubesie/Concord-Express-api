@@ -3,114 +3,55 @@ const express  = require('express');
 const router   = express.Router();
 const supabase = require('../lib/supabase');
 
-// Lazy Twilio — only initialized when first used, not at startup
-let _twilio = null;
-const getTwilio = () => {
-  if (!_twilio) {
-    _twilio = require('twilio')(
-      process.env.TWILIO_ACCOUNT_SID,
-      process.env.TWILIO_AUTH_TOKEN
-    );
-  }
-  return _twilio;
-};
-
-// In-memory OTP store (use Redis in production)
 const otpStore = new Map();
-
-// ── POST /api/auth/send-otp ───────────────────────────────────────────────────
 
 router.post('/send-otp', async (req, res) => {
   try {
     const { phone } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
-
     const normalized = phone.replace(/\D/g, '');
     const e164 = normalized.startsWith('1') ? `+${normalized}` : `+1${normalized}`;
-
     const otp     = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000;
-
     otpStore.set(e164, { otp, expires, attempts: 0 });
-
-    if (process.env.NODE_ENV === 'production' && process.env.TWILIO_ACCOUNT_SID) {
-      await getTwilio().messages.create({
-        body: `Your Concord Xpress code is: ${otp}. Valid for 10 minutes.`,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        to:   e164,
-      });
-    } else {
-      console.log(`[DEV] OTP for ${e164}: ${otp}`);
-    }
-
-    res.json({ success: true, message: 'OTP sent',
-      ...(process.env.NODE_ENV !== 'production' && { dev_otp: otp }) });
+    console.log(`[OTP] ${e164}: ${otp}`);
+    res.json({ success: true, message: 'OTP sent', dev_otp: otp });
   } catch (err) {
-    console.error('[Auth] send-otp error:', err);
     res.status(500).json({ error: 'Failed to send OTP' });
   }
 });
-
-// ── POST /api/auth/verify-otp ─────────────────────────────────────────────────
 
 router.post('/verify-otp', async (req, res) => {
   try {
     const { phone, otp, fullName } = req.body;
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
-
     const normalized = phone.replace(/\D/g, '');
     const e164 = normalized.startsWith('1') ? `+${normalized}` : `+1${normalized}`;
-
     const stored = otpStore.get(e164);
-    if (!stored)                    return res.status(400).json({ error: 'No OTP found. Request a new one.' });
-    if (Date.now() > stored.expires){ otpStore.delete(e164); return res.status(400).json({ error: 'OTP expired.' }); }
-    if (stored.attempts >= 5)       { otpStore.delete(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
-    if (stored.otp !== otp)         { stored.attempts++; return res.status(400).json({ error: 'Invalid OTP' }); }
-
+    if (!stored) return res.status(400).json({ error: 'No OTP found. Request a new one.' });
+    if (Date.now() > stored.expires) { otpStore.delete(e164); return res.status(400).json({ error: 'OTP expired.' }); }
+    if (stored.attempts >= 5) { otpStore.delete(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
+    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid OTP' }); }
     otpStore.delete(e164);
-
-    // Check if user exists
-    const { data: existingUser } = await supabase
-      .from('users').select('id').eq('phone', e164).single();
-
+    const { data: existingUser } = await supabase.from('users').select('id').eq('phone', e164).single();
     let userId;
-
     if (existingUser) {
       userId = existingUser.id;
     } else {
-      // Create new user
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        phone: e164, phone_confirm: true,
-      });
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({ phone: e164, phone_confirm: true });
       if (authError) throw authError;
       userId = authData.user.id;
-
       const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-      await supabase.from('users').insert({
-        id: userId, phone: e164,
-        full_name: fullName || 'Concord User',
-        is_founding_member: (count ?? 0) < 100,
-      });
+      await supabase.from('users').insert({ id: userId, phone: e164, full_name: fullName || 'Concord User', is_founding_member: (count ?? 0) < 100 });
     }
-
     const { data: session, error: sessionError } = await supabase.auth.admin.createSession({ user_id: userId });
     if (sessionError) throw sessionError;
-
     const { data: userProfile } = await supabase.from('users').select('*').eq('id', userId).single();
-
-    res.json({
-      success:       true,
-      access_token:  session.access_token,
-      refresh_token: session.refresh_token,
-      user:          userProfile,
-    });
+    res.json({ success: true, access_token: session.access_token, refresh_token: session.refresh_token, user: userProfile });
   } catch (err) {
-    console.error('[Auth] verify-otp error:', err);
-    res.status(500).json({ error: 'Verification failed' });
+    res.status(500).json({ error: 'Verification failed: ' + err.message });
   }
 });
-
-// ── POST /api/auth/refresh ────────────────────────────────────────────────────
 
 router.post('/refresh', async (req, res) => {
   try {
@@ -123,8 +64,6 @@ router.post('/refresh', async (req, res) => {
     res.status(500).json({ error: 'Refresh failed' });
   }
 });
-
-// ── DELETE /api/auth/logout ───────────────────────────────────────────────────
 
 router.delete('/logout', async (req, res) => {
   try {
