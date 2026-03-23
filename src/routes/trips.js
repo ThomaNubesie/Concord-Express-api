@@ -100,7 +100,7 @@ router.get('/', async (req, res) => {
       .order('departure_at', { ascending: true })
       .limit(parseInt(limit));
 
-    let filtered = (fullTrips || []).filter(t => (t.seats_total - t.seats_booked) >= parseInt(seats));
+    let filtered = fullTrips || [];
 
     if (priority === 'price')   filtered.sort((a, b) => a.price_per_seat - b.price_per_seat);
     if (priority === 'comfort') filtered.sort((a, b) => getComfortScore(b) - getComfortScore(a));
