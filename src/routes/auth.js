@@ -16,12 +16,32 @@ function generateOTP(key) {
   return otp;
 }
 
+function makeTokens(userId) {
+  const accessToken  = jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '1h' });
+  const refreshToken = jwt.sign({ sub: userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
+  return { accessToken, refreshToken };
+}
+
+// Check for duplicate phone BEFORE sending OTP
 router.post('/send-otp', async (req, res) => {
   try {
-    const { phone } = req.body;
+    const { phone, isNewUser } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
     const digits = phone.replace(/\D/g, '');
     const e164 = digits.startsWith('1') ? '+' + digits : '+1' + digits;
+
+    // If signing up (not signing in), check phone not already registered
+    if (isNewUser) {
+      const { data: existing } = await supabase
+        .from('users').select('id').eq('phone', e164).single();
+      if (existing) {
+        return res.status(409).json({
+          error: 'This phone number is already registered. Please sign in instead.',
+          code: 'PHONE_EXISTS',
+        });
+      }
+    }
+
     const otp = generateOTP(e164);
     res.json({ success: true, message: 'OTP sent', dev_otp: otp });
   } catch (err) {
@@ -31,33 +51,74 @@ router.post('/send-otp', async (req, res) => {
 
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { phone, otp, fullName } = req.body;
+    const { phone, otp, fullName, email, isNewUser } = req.body;
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
     const digits = phone.replace(/\D/g, '');
     const e164 = digits.startsWith('1') ? '+' + digits : '+1' + digits;
+
+    // Verify OTP
     const stored = otpStore.get(e164);
     if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
     if (Date.now() > stored.expires) { otpStore.delete(e164); return res.status(400).json({ error: 'Code expired.' }); }
     if (stored.attempts >= 5) { otpStore.delete(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
     if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
     otpStore.delete(e164);
-    const safeName = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
-    const { data: existingUser } = await supabase.from('users').select('*').eq('phone', e164).single();
+
+    const safeName  = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
+    const safeEmail = email ? email.toLowerCase().trim() : null;
+
+    // Check existing user by phone
+    const { data: existingUser } = await supabase
+      .from('users').select('*').eq('phone', e164).single();
+
     let user;
+
     if (existingUser) {
+      // Existing user -- update email if provided and not already set
+      if (safeEmail && !existingUser.email) {
+        // Check email not used by another account
+        const { data: emailConflict } = await supabase
+          .from('users').select('id').eq('email', safeEmail).single();
+        if (emailConflict && emailConflict.id !== existingUser.id) {
+          return res.status(409).json({
+            error: 'This email is already linked to another account.',
+            code: 'EMAIL_EXISTS',
+          });
+        }
+        await supabase.from('users').update({ email: safeEmail }).eq('id', existingUser.id);
+        existingUser.email = safeEmail;
+      }
       user = existingUser;
     } else {
+      // New user -- check email uniqueness if provided
+      if (safeEmail) {
+        const { data: emailConflict } = await supabase
+          .from('users').select('id').eq('email', safeEmail).single();
+        if (emailConflict) {
+          return res.status(409).json({
+            error: 'This email is already linked to another account. Use a different email or leave it blank.',
+            code: 'EMAIL_EXISTS',
+          });
+        }
+      }
+
       const userId = uuidv4();
       const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
       const { data: newUser, error: insertError } = await supabase
         .from('users')
-        .insert({ id: userId, phone: e164, full_name: safeName, is_founding_member: (count ?? 0) < 100 })
+        .insert({
+          id:                userId,
+          phone:             e164,
+          full_name:         safeName,
+          email:             safeEmail,
+          is_founding_member:(count ?? 0) < 100,
+        })
         .select().single();
       if (insertError) throw insertError;
       user = newUser;
     }
-    const accessToken  = jwt.sign({ sub: user.id, phone: e164 }, JWT_SECRET, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ sub: user.id, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
+
+    const { accessToken, refreshToken } = makeTokens(user.id);
     res.json({ success: true, access_token: accessToken, refresh_token: refreshToken, user });
   } catch (err) {
     console.error('[Auth] verify-otp error:', err);
@@ -92,8 +153,7 @@ router.post('/verify-email-otp', async (req, res) => {
     otpStore.delete(e);
     const { data: user } = await supabase.from('users').select('*').eq('email', e).single();
     if (!user) return res.status(404).json({ error: 'No account found with this email.' });
-    const accessToken  = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ sub: user.id, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
+    const { accessToken, refreshToken } = makeTokens(user.id);
     res.json({ success: true, access_token: accessToken, refresh_token: refreshToken, user });
   } catch (err) {
     res.status(500).json({ error: 'Verification failed: ' + err.message });
@@ -107,9 +167,8 @@ router.post('/refresh', async (req, res) => {
     const decoded = jwt.verify(refresh_token, JWT_SECRET);
     const { data: user } = await supabase.from('users').select('*').eq('id', decoded.sub).single();
     if (!user) return res.status(401).json({ error: 'User not found' });
-    const newAccess  = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '1h' });
-    const newRefresh = jwt.sign({ sub: user.id, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ access_token: newAccess, refresh_token: newRefresh });
+    const { accessToken, refreshToken } = makeTokens(user.id);
+    res.json({ access_token: accessToken, refresh_token: refreshToken });
   } catch (err) {
     res.status(401).json({ error: 'Invalid refresh token' });
   }
