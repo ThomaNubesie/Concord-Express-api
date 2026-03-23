@@ -218,6 +218,7 @@ async function verifyOTPCode(key, otp) {
 }
 
 async function getOrCreateUser({ phone, fullName }) {
+  const safeName = (fullName || "Concord User").replace(/[^\x00-\x7F]/g, "").trim() || "Concord User";
   try {
     const { data: existingUser } = await supabase
       .from('users').select('id').eq('phone', phone).single();
@@ -238,7 +239,7 @@ async function getOrCreateUser({ phone, fullName }) {
       await supabase.from('users').insert({
         id:                userId,
         phone,
-        full_name:         fullName || 'Concord User',
+        full_name:         safeName,
         is_founding_member:(count ?? 0) < 100,
       });
     }
