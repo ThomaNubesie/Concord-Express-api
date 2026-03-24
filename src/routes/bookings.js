@@ -440,3 +440,36 @@ router.post('/:id/noshow', verifyAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// ── GET /api/bookings — Get current user's bookings ───────────────────────────
+router.get('/', verifyAuth, async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    let query = supabase
+      .from('bookings')
+      .select(`
+        *,
+        trip:trips(
+          id, from_city, to_city, departure_at,
+          price_per_seat, status,
+          driver:users!trips_driver_id_fkey(
+            id, full_name, avatar_url, rating_as_driver, phone
+          )
+        ),
+        pickup_stop:pickup_stops!bookings_pickup_stop_id_fkey(id, area, departs_at),
+        dropoff_stop:dropoff_stops!bookings_dropoff_stop_id_fkey(id, area)
+      `)
+      .eq('passenger_id', req.userId)
+      .order('created_at', { ascending: false });
+
+    if (status) query = query.eq('status', status);
+
+    const { data: bookings, error } = await query;
+    if (error) throw error;
+
+    res.json({ bookings: bookings || [] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
