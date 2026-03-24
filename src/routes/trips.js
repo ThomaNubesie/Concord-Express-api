@@ -106,7 +106,7 @@ router.get('/', async (req, res) => {
 
     // Filter trips with available seats
     // Show all trips but mark availability
-    let filtered = fullTrips || [];
+    let filtered = trips || [];
     // For seat filtering: only hide trips where seats needed > available AND trip is not fully booked (fake)
     if (parseInt(seats) > 1) {
       filtered = filtered.filter(t => {
