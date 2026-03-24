@@ -179,3 +179,34 @@ router.delete('/logout', async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/auth/extract-intent — Voice search intent extraction
+router.post('/extract-intent', async (req, res) => {
+  const { text, userCity } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const today     = new Date();
+  const todayStr  = today.toISOString().split('T')[0];
+  const dayNames  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const todayName = dayNames[today.getDay()];
+  const tomorrow  = new Date(today.getTime() + 86400000).toISOString().split('T')[0];
+
+  try {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client    = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    const message = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system:     `You extract travel intent for a Canadian carpooling app. Today is ${todayName} ${todayStr}. Tomorrow is ${tomorrow}. User home city: ${userCity || 'ottawa'}. Cities: ottawa, toronto, kingston, cornwall, peterborough, montreal, quebec, chicoutimi, moncton, fredericton. Respond ONLY with JSON: {"from_city": string|null, "to_city": string|null, "date": "YYYY-MM-DD"|null, "seats": number|null, "priority": "time"|"price"|"comfort"|null}. RULES: "tomorrow" = ${tomorrow}. Day names = next occurrence. "today" = ${todayStr}. "2 seats"/"two people"/"two seats" = seats:2. "3 seats"/"three" = seats:3. cheapest/cheap/budget = price. fastest/early = time. best/comfortable = comfort. "the 6ix"/toronto/TO = toronto. MTL/montreal = montreal. YOW/ottawa = ottawa. ALWAYS extract seats when a number is mentioned. ALWAYS extract date when today/tomorrow/day name mentioned.`,
+      messages:   [{ role: 'user', content: text }],
+    });
+
+    const raw    = message.content?.[0]?.text || '{}';
+    const clean  = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+    res.json({ intent: parsed });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to extract intent' });
+  }
+});
