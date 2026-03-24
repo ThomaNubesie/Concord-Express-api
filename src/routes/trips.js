@@ -405,4 +405,38 @@ router.patch('/:id/stops/:stopId/complete', verifyAuth, async (req, res) => {
   }
 });
 
+
+// POST /api/trips/:id/start — Driver starts the trip
+router.post('/:id/start', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips').select('driver_id, status').eq('id', req.params.id).single();
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+    if (trip.status !== 'upcoming') return res.status(400).json({ error: 'Trip cannot be started' });
+    await supabase.from('trips').update({ status: 'active' }).eq('id', req.params.id);
+    await supabase.from('bookings').update({ status: 'active' })
+      .eq('trip_id', req.params.id).in('status', ['confirmed']);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start trip' });
+  }
+});
+
+// POST /api/trips/:id/complete — Driver completes the trip
+router.post('/:id/complete', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips').select('driver_id').eq('id', req.params.id).single();
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+    await supabase.from('trips').update({ status: 'completed' }).eq('id', req.params.id);
+    await supabase.from('bookings').update({ status: 'completed' })
+      .eq('trip_id', req.params.id).in('status', ['active', 'confirmed']);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to complete trip' });
+  }
+});
+
 module.exports = router;

@@ -35,6 +35,7 @@ router.get('/analytics', verifyAuth, async (req, res) => {
   res.json({ gross, net: gross * 0.9, trips: myBookings.length, passengers: myBookings.reduce((s, b) => s + b.seats, 0) });
 });
 
+// POST /api/driver/location — Update driver location
 router.post('/location', verifyAuth, async (req, res) => {
   const { trip_id, lat, lng, heading, speed } = req.body;
   if (!trip_id || !lat || !lng) return res.status(400).json({ error: 'trip_id, lat, lng required' });
@@ -44,6 +45,24 @@ router.post('/location', verifyAuth, async (req, res) => {
   );
   if (error) return res.status(500).json({ error: 'Failed to update location' });
   res.json({ success: true });
+});
+
+// GET /api/driver/location/:tripId — Get driver's current location for a trip
+router.get('/location/:tripId', verifyAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('driver_locations')
+      .select('*')
+      .eq('trip_id', req.params.tripId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) return res.json({ location: null });
+    res.json({ location: data });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch location' });
+  }
 });
 
 module.exports = router;
