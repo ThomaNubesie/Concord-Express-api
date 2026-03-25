@@ -365,7 +365,41 @@ router.patch('/:id', verifyAuth, async (req, res) => {
     const { data: updated, error } = await supabase.from('trips')
       .update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
-    res.json({ trip: updated });
+
+    // Update pickup stops if provided and trip is unlocked
+    if (lockState === 'unlocked' && req.body.pickup_stops?.length) {
+      await supabase.from('pickup_stops').delete().eq('trip_id', req.params.id);
+      await supabase.from('pickup_stops').insert(
+        req.body.pickup_stops.map((s, i) => ({
+          trip_id:    req.params.id,
+          area:       s.area,
+          lat:        s.lat || 45.4215,
+          lng:        s.lng || -75.6972,
+          departs_at: s.time || s.departs_at || req.body.departure_at,
+          stop_order: i,
+        }))
+      );
+    }
+
+    // Update dropoff stops if provided and trip is unlocked
+    if (lockState === 'unlocked' && req.body.dropoff_stops?.length) {
+      await supabase.from('dropoff_stops').delete().eq('trip_id', req.params.id);
+      await supabase.from('dropoff_stops').insert(
+        req.body.dropoff_stops.map((s, i) => ({
+          trip_id:    req.params.id,
+          area:       s.area,
+          lat:        s.lat || 45.4215,
+          lng:        s.lng || -75.6972,
+          stop_order: i,
+        }))
+      );
+    }
+
+    const { data: fullTrip } = await supabase.from('trips')
+      .select('*, pickup_stops(*), dropoff_stops(*)')
+      .eq('id', req.params.id).single();
+
+    res.json({ trip: fullTrip || updated });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update trip' });
   }
