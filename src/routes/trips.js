@@ -351,7 +351,7 @@ router.patch('/:id', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: 'Trip is locked and cannot be edited' });
     }
     const allowedFields = lockState === 'unlocked'
-      ? ['seats_total','price_per_seat','departure_at','notes',
+      ? ['seats_total','price_per_seat','departure_at','notes','booking_closes_at',
          'pref_ac','pref_music','pref_pets','pref_smoking','pref_no_eating',
          'pref_no_drinks','pref_shoes_on','pref_quiet_ride','pref_brief_calls',
          'pref_temperature','pref_extra_stops','pref_children','pref_wait_mins','pref_luggage']
