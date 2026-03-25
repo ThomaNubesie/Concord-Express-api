@@ -475,3 +475,19 @@ router.post('/:id/complete', verifyAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/trips/:id/close — Driver closes trip from new bookings
+router.post('/:id/close', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips').select('driver_id, status').eq('id', req.params.id).single();
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+    await supabase.from('trips')
+      .update({ booking_closes_at: new Date().toISOString() })
+      .eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to close trip' });
+  }
+});
