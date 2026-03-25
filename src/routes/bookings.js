@@ -473,3 +473,101 @@ router.get('/', verifyAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch bookings' });
   }
 });
+
+// POST /api/bookings/:id/approve — Driver approves booking
+router.post('/:id/approve', verifyAuth, async (req, res) => {
+  try {
+    const { data: booking, error } = await supabase
+      .from('bookings')
+      .select('*, trip:trips(driver_id)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.trip?.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+
+    await supabase.from('bookings')
+      .update({ approval_status: 'approved', status: 'confirmed' })
+      .eq('id', req.params.id);
+
+    // Notify passenger
+    await supabase.from('notifications').insert({
+      user_id: booking.passenger_id,
+      type: 'booking',
+      title: 'Booking Approved!',
+      body: 'Your booking request has been approved by the driver.',
+      action_url: `/passenger/home`,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve booking' });
+  }
+});
+
+// POST /api/bookings/:id/decline — Driver declines booking with reason
+router.post('/:id/decline', verifyAuth, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const { data: booking, error } = await supabase
+      .from('bookings')
+      .select('*, trip:trips(driver_id, from_city, to_city)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.trip?.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+
+    // Update booking status
+    await supabase.from('bookings')
+      .update({ 
+        approval_status: 'declined', 
+        status: 'cancelled',
+        cancel_reason: reason || 'Declined by driver',
+        cancel_by: 'driver',
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq('id', req.params.id);
+
+    // Free up the seats
+    await supabase.from('trips')
+      .update({ seats_booked: supabase.raw('seats_booked - ' + booking.seats) })
+      .eq('id', booking.trip_id);
+
+    // Send reason as a chat message
+    if (reason) {
+      const { data: driver } = await supabase
+        .from('users').select('id').eq('id', req.userId).single();
+      await supabase.from('messages').insert({
+        booking_id: booking.id,
+        sender_id:  req.userId,
+        content:    `Booking declined: ${reason}`,
+      });
+    }
+
+    // Notify passenger
+    await supabase.from('notifications').insert({
+      user_id: booking.passenger_id,
+      type: 'cancel',
+      title: 'Booking Declined',
+      body: reason ? `Your booking was declined: ${reason}` : 'Your booking request was declined by the driver.',
+      action_url: `/passenger/home`,
+    });
+
+    // Process refund if payment was captured
+    if (booking.stripe_payment_intent_id && booking.total_amount > 0) {
+      try {
+        const stripe = require('../lib/stripe');
+        await stripe.refunds.create({
+          payment_intent: booking.stripe_payment_intent_id,
+        });
+      } catch (e) {
+        console.log('[Stripe] Refund failed:', e.message);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to decline booking' });
+  }
+});
