@@ -41,6 +41,11 @@ router.post('/', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: `Only ${seatsAvailable} seats available` });
     }
 
+    // Block driver from booking their own trip
+    if (trip.driver_id === req.userId) {
+      return res.status(400).json({ error: 'You cannot book your own trip' });
+    }
+
     // Check passenger hasn't already booked this trip
     const { data: existingBooking } = await supabase
       .from('bookings')
