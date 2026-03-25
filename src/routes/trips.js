@@ -458,23 +458,54 @@ router.post('/:id/start', verifyAuth, async (req, res) => {
   }
 });
 
-// POST /api/trips/:id/complete — Driver completes the trip
+// POST /api/trips/:id/complete — Driver completes the trip + captures payments
 router.post('/:id/complete', verifyAuth, async (req, res) => {
   try {
     const { data: trip, error } = await supabase
       .from('trips').select('driver_id').eq('id', req.params.id).single();
     if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
     if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
-    await supabase.from('trips').update({ status: 'completed' }).eq('id', req.params.id);
-    await supabase.from('bookings').update({ status: 'completed' })
-      .eq('trip_id', req.params.id).in('status', ['active', 'confirmed']);
+
+    // Mark trip completed
+    await supabase.from('trips').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', req.params.id);
+
+    // Get all confirmed bookings with payment intents
+    const { data: bookings } = await supabase
+      .from('bookings')
+      .select('id, stripe_payment_intent_id, fare_amount, seats, passenger_id')
+      .eq('trip_id', req.params.id)
+      .in('status', ['active', 'confirmed']);
+
+    // Capture each payment intent (release from escrow)
+    const stripe = require('../lib/stripe');
+    for (const booking of bookings || []) {
+      if (booking.stripe_payment_intent_id) {
+        try {
+          await stripe.paymentIntents.capture(booking.stripe_payment_intent_id);
+        } catch (e) {
+          console.log('[Stripe] Capture failed for booking', booking.id, e.message);
+        }
+      }
+      // Mark booking completed
+      await supabase.from('bookings')
+        .update({ status: 'completed' })
+        .eq('id', booking.id);
+
+      // Notify passenger
+      await supabase.from('notifications').insert({
+        user_id: booking.passenger_id,
+        type: 'trip',
+        title: '🏁 Trip Completed',
+        body: 'Your trip is complete. Payment has been processed. Thank you for riding with Concord!',
+      });
+    }
+
     res.json({ success: true });
   } catch (err) {
+    console.error('[Trips] complete error:', err);
     res.status(500).json({ error: 'Failed to complete trip' });
   }
 });
-
-module.exports = router;
 
 // POST /api/trips/:id/close — Driver closes trip from new bookings
 router.post('/:id/close', verifyAuth, async (req, res) => {

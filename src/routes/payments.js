@@ -34,6 +34,103 @@ router.delete('/methods/:id', verifyAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to remove payment method' }); }
 });
 
+// POST /api/payments/connect/onboard — Create Stripe Connect account for driver
+router.post('/connect/onboard', verifyAuth, async (req, res) => {
+  try {
+    const { data: profile } = await supabase
+      .from('driver_profiles')
+      .select('stripe_account_id')
+      .eq('user_id', req.userId).single();
+
+    let accountId = profile?.stripe_account_id;
+
+    // Create Connect account if doesn't exist
+    if (!accountId) {
+      const { data: user } = await supabase
+        .from('users').select('email, full_name').eq('id', req.userId).single();
+
+      const account = await stripe.accounts.create({
+        type:    'express',
+        country: 'CA',
+        email:   user?.email,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers:     { requested: true },
+        },
+        business_type: 'individual',
+        metadata: { supabase_user_id: req.userId },
+      });
+
+      accountId = account.id;
+      await supabase.from('driver_profiles')
+        .update({ stripe_account_id: accountId })
+        .eq('user_id', req.userId);
+    }
+
+    // Create onboarding link
+    const accountLink = await stripe.accountLinks.create({
+      account:     accountId,
+      refresh_url: 'https://concord-express-api-production.up.railway.app/api/payments/connect/onboard',
+      return_url:  'https://concord-express-api-production.up.railway.app/api/payments/connect/complete',
+      type:        'account_onboarding',
+    });
+
+    res.json({ url: accountLink.url, account_id: accountId });
+  } catch (err) {
+    console.error('[Connect] onboard error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments/connect/status — Check driver Connect account status
+router.get('/connect/status', verifyAuth, async (req, res) => {
+  try {
+    const { data: profile } = await supabase
+      .from('driver_profiles')
+      .select('stripe_account_id')
+      .eq('user_id', req.userId).single();
+
+    if (!profile?.stripe_account_id) {
+      return res.json({ connected: false, charges_enabled: false });
+    }
+
+    const account = await stripe.accounts.retrieve(profile.stripe_account_id);
+    res.json({
+      connected:       true,
+      charges_enabled: account.charges_enabled,
+      payouts_enabled: account.payouts_enabled,
+      account_id:      profile.stripe_account_id,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments/connect/balance — Driver wallet balance
+router.get('/connect/balance', verifyAuth, async (req, res) => {
+  try {
+    const { data: profile } = await supabase
+      .from('driver_profiles')
+      .select('stripe_account_id')
+      .eq('user_id', req.userId).single();
+
+    if (!profile?.stripe_account_id) {
+      return res.json({ available: 0, pending: 0 });
+    }
+
+    const balance = await stripe.balance.retrieve(
+      { stripeAccount: profile.stripe_account_id }
+    );
+
+    const available = balance.available.reduce((sum, b) => sum + b.amount, 0) / 100;
+    const pending   = balance.pending.reduce((sum, b) => sum + b.amount, 0) / 100;
+
+    res.json({ available, pending, currency: 'cad' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/payout', verifyAuth, async (req, res) => {
   try {
     const { data: profile } = await supabase.from('driver_profiles').select('stripe_account_id').eq('user_id', req.userId).single();
