@@ -260,6 +260,7 @@ router.post('/', verifyAuth, async (req, res) => {
   try {
     const { from_city, to_city, departure_at, seats_total, price_per_seat,
             pickup_stops, dropoff_stops, preferences = {}, notes,
+            booking_type = 'direct',
             is_transit = false, is_recurring = false, recurring_days } = req.body;
 
     if (!from_city || !to_city || !departure_at || !seats_total || !price_per_seat) {
@@ -287,7 +288,7 @@ router.post('/', verifyAuth, async (req, res) => {
       driver_id: req.userId, from_city: from_city.toLowerCase(), to_city: to_city.toLowerCase(),
       departure_at, seats_total, price_per_seat,
       price_floor: bounds.floor, price_ceiling: bounds.ceiling,
-      notes, is_transit, is_recurring, recurring_days,
+      notes, booking_type, is_transit, is_recurring, recurring_days,
       pref_ac:          preferences.ac           ?? true,
       pref_music:       preferences.music        ?? true,
       pref_pets:        preferences.pets         ?? false,
