@@ -522,3 +522,5 @@ router.post('/:id/close', verifyAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to close trip' });
   }
 });
+
+module.exports = router;
