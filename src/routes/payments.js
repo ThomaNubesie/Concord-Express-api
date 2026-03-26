@@ -14,7 +14,7 @@ router.post('/setup-intent', verifyAuth, async (req, res) => {
       await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
     }
     const intent = await stripe.setupIntents.create({ customer: customerId, payment_method_types: ['card'] });
-    res.json({ client_secret: intent.client_secret });
+    res.json({ client_secret: intent.client_secret, customer_id: customerId });
   } catch (err) { res.status(500).json({ error: 'Failed to create setup intent' }); }
 });
 
