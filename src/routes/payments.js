@@ -27,6 +27,34 @@ router.get('/methods', verifyAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed to fetch payment methods' }); }
 });
 
+// POST /api/payments/attach-method — Attach payment method to customer after confirmSetup
+router.post('/attach-method', verifyAuth, async (req, res) => {
+  try {
+    const { payment_method_id } = req.body;
+    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
+
+    const { data: user } = await supabase
+      .from('users').select('stripe_customer_id').eq('id', req.userId).single();
+
+    let customerId = user?.stripe_customer_id;
+    if (!customerId) {
+      const c = await stripe.customers.create({ metadata: { user_id: req.userId } });
+      customerId = c.id;
+      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
+    }
+
+    await stripe.paymentMethods.attach(payment_method_id, { customer: customerId });
+    await stripe.customers.update(customerId, {
+      invoice_settings: { default_payment_method: payment_method_id },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Payments] attach error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete('/methods/:id', verifyAuth, async (req, res) => {
   try {
     await stripe.paymentMethods.detach(req.params.id);
