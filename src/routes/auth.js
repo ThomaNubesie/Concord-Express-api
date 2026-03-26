@@ -59,7 +59,7 @@ router.post('/send-otp', async (req, res) => {
         });
         console.log('[OTP] SMS sent to', e164);
         res.json({ success: true, message: 'OTP sent' });
-      } catch (smsErr: any) {
+      } catch (smsErr) {
         console.error('[Twilio] SMS failed:', smsErr.message);
         // Fall back to dev mode
         res.json({ success: true, message: 'OTP sent', dev_otp: otp });
