@@ -5,6 +5,11 @@ const supabase = require('../lib/supabase');
 const { v4: uuidv4 } = require('uuid');
 const jwt      = require('jsonwebtoken');
 
+const twilio    = require('twilio');
+const twilioClient = process.env.TWILIO_ACCOUNT_SID
+  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
+
 const otpStore = new Map();
 const JWT_SECRET = process.env.JWT_SECRET || 'concordxpress-secret';
 
@@ -43,7 +48,26 @@ router.post('/send-otp', async (req, res) => {
     }
 
     const otp = generateOTP(e164);
-    res.json({ success: true, message: 'OTP sent', dev_otp: otp });
+
+    // Send via Twilio if configured
+    if (twilioClient) {
+      try {
+        await twilioClient.messages.create({
+          body: `Your Concord Xpress verification code is: ${otp}. Valid for 10 minutes.`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to:   e164,
+        });
+        console.log('[OTP] SMS sent to', e164);
+        res.json({ success: true, message: 'OTP sent' });
+      } catch (smsErr: any) {
+        console.error('[Twilio] SMS failed:', smsErr.message);
+        // Fall back to dev mode
+        res.json({ success: true, message: 'OTP sent', dev_otp: otp });
+      }
+    } else {
+      // Dev mode — return OTP in response
+      res.json({ success: true, message: 'OTP sent', dev_otp: otp });
+    }
   } catch (err) {
     res.status(500).json({ error: 'Failed to send OTP' });
   }
