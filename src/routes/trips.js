@@ -507,6 +507,36 @@ router.post('/:id/complete', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/trips/:id/running-late — Driver notifies passengers they are running late
+router.post('/:id/running-late', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip } = await supabase
+      .from('trips').select('driver_id, from_city, to_city, departure_at')
+      .eq('id', req.params.id).single();
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+
+    const { data: bookings } = await supabase
+      .from('bookings').select('passenger_id')
+      .eq('trip_id', req.params.id)
+      .eq('status', 'confirmed');
+
+    if (bookings?.length) {
+      await supabase.from('notifications').insert(
+        bookings.map((b) => ({
+          user_id: b.passenger_id,
+          type: 'trip',
+          title: '⏱ Driver Running Late',
+          body: `Your driver is running late for the ${trip.from_city} → ${trip.to_city} trip. Please stand by.`,
+        }))
+      );
+    }
+    res.json({ success: true, notified: bookings?.length || 0 });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to notify passengers' });
+  }
+});
+
 // POST /api/trips/:id/close — Driver closes trip from new bookings
 router.post('/:id/close', verifyAuth, async (req, res) => {
   try {
