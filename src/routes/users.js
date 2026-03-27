@@ -23,6 +23,21 @@ router.patch('/me', verifyAuth, async (req, res) => {
   res.json({ user: data });
 });
 
+// PATCH /api/users/me/driver-profile — update driver profile settings
+router.patch('/me/driver-profile', verifyAuth, async (req, res) => {
+  const allowed = ['default_cash_only', 'vehicle_make', 'vehicle_model', 'vehicle_year', 'vehicle_color', 'vehicle_plate', 'vehicle_province'];
+  const updates = {};
+  for (const field of allowed) {
+    if (req.body[field] !== undefined) updates[field] = req.body[field];
+  }
+  const { data, error } = await supabase
+    .from('driver_profiles')
+    .upsert({ user_id: req.userId, ...updates }, { onConflict: 'user_id' })
+    .select().single();
+  if (error) return res.status(500).json({ error: 'Update failed' });
+  res.json({ driver_profile: data });
+});
+
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('users')
