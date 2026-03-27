@@ -71,10 +71,17 @@ router.get('/', async (req, res) => {
         driver:users!trips_driver_id_fkey(
           id, full_name, avatar_url,
           rating_as_driver, total_trips_driver,
-          is_verified
+          is_verified,
+          driver_profile:driver_profiles(
+            vehicle_make, vehicle_model, vehicle_year, vehicle_color
+          )
         ),
         pickup_stops(*),
-        dropoff_stops(*)
+        dropoff_stops(*),
+        bookings(
+          id, status,
+          passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url)
+        )
       `)
       .eq('from_city', from_city.toLowerCase())
       .eq('to_city', to_city.toLowerCase())
