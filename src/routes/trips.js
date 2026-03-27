@@ -261,6 +261,7 @@ router.post('/', verifyAuth, async (req, res) => {
     const { from_city, to_city, departure_at, seats_total, price_per_seat,
             pickup_stops, dropoff_stops, preferences = {}, notes,
             booking_type = 'direct',
+    cashOnly = false,
             is_transit = false, is_recurring = false, recurring_days } = req.body;
 
     if (!from_city || !to_city || !departure_at || !seats_total || !price_per_seat) {
@@ -302,6 +303,7 @@ router.post('/', verifyAuth, async (req, res) => {
       pref_extra_stops: preferences.extraStops   ?? 'none',
       pref_children:    preferences.children     ?? 'welcome',
       pref_wait_mins:   preferences.waitMins     ?? 5,
+      cash_only:        cashOnly ?? false,
       pref_luggage:     preferences.luggage      ?? 'all',
     }).select().single();
     if (tripError) throw tripError;

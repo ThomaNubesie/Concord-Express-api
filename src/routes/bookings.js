@@ -14,9 +14,10 @@ router.post('/', verifyAuth, async (req, res) => {
       seats = 1, payment_method_id, credit_to_apply = 0,
     } = req.body;
 
-    if (!trip_id || !pickup_stop_id || !dropoff_stop_id || !payment_method_id) {
+    if (!trip_id || !pickup_stop_id || !dropoff_stop_id) {
       return res.status(400).json({ error: 'Missing required booking fields' });
     }
+    // For card trips, payment_method_id is required (checked after trip fetch)
 
     // Fetch trip
     const { data: trip, error: tripError } = await supabase
@@ -61,7 +62,12 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Calculate amounts
     const fareAmount  = trip.price_per_seat * seats;
-    const bookingFee  = parseFloat(process.env.BOOKING_FEE ?? '3.00') * seats;
+    const bookingFee  = trip.cash_only ? 5.00 : parseFloat(process.env.BOOKING_FEE ?? '3.00') * seats;
+
+    // For cash trips, block if no payment method (needed for booking fee)
+    if (!trip.cash_only && !payment_method_id) {
+      return res.status(400).json({ error: 'Payment method required for card trips' });
+    }
     const creditUsed  = Math.min(credit_to_apply, fareAmount + bookingFee);
     const totalAmount = Math.max(0, fareAmount + bookingFee - creditUsed);
 
@@ -94,28 +100,43 @@ router.post('/', verifyAuth, async (req, res) => {
       .eq('user_id', trip.driver_id)
       .single();
 
-    // Create PaymentIntent with escrow
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount:               Math.round(totalAmount * 100), // cents
-      currency:             'cad',
-      customer:             customerId,
-      payment_method:       payment_method_id,
-      confirm:              true,
-      capture_method:       'manual', // hold funds, don't capture yet
-      transfer_data:        driverProfile?.stripe_account_id ? {
-        destination:        driverProfile.stripe_account_id,
-        amount:             Math.round(fareAmount * seats * 0.9 * 100), // 90% to driver
-      } : undefined,
-      metadata: {
-        trip_id,
-        passenger_id: req.userId,
-        driver_id:    trip.driver_id,
-      },
-      return_url: 'concordxpress://payment-complete',
-    });
-
-    if (paymentIntent.status !== 'requires_capture') {
-      return res.status(400).json({ error: 'Payment failed. Please check your payment method.' });
+    // Create PaymentIntent — cash trips only charge booking fee, card trips charge full amount
+    let paymentIntent;
+    if (trip.cash_only) {
+      // Cash trip: only charge C$5 booking fee, no escrow needed
+      paymentIntent = await stripe.paymentIntents.create({
+        amount:         Math.round(bookingFee * 100),
+        currency:       'cad',
+        customer:       customerId,
+        payment_method: payment_method_id,
+        confirm:        true,
+        capture_method: 'automatic',
+        description:    'Cash trip booking fee',
+        metadata: { trip_id, passenger_id: req.userId, driver_id: trip.driver_id, cash_only: 'true' },
+        return_url: 'concordxpress://payment-complete',
+      });
+      if (!['succeeded','processing'].includes(paymentIntent.status)) {
+        return res.status(400).json({ error: 'Booking fee payment failed. Please check your card.' });
+      }
+    } else {
+      // Card trip: full escrow flow
+      paymentIntent = await stripe.paymentIntents.create({
+        amount:         Math.round(totalAmount * 100),
+        currency:       'cad',
+        customer:       customerId,
+        payment_method: payment_method_id,
+        confirm:        true,
+        capture_method: 'manual',
+        transfer_data:  driverProfile?.stripe_account_id ? {
+          destination: driverProfile.stripe_account_id,
+          amount:      Math.round(fareAmount * seats * 0.9 * 100),
+        } : undefined,
+        metadata: { trip_id, passenger_id: req.userId, driver_id: trip.driver_id },
+        return_url: 'concordxpress://payment-complete',
+      });
+      if (paymentIntent.status !== 'requires_capture') {
+        return res.status(400).json({ error: 'Payment failed. Please check your payment method.' });
+      }
     }
 
     // Create booking record
