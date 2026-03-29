@@ -294,4 +294,77 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
   }
 });
 
+
+// POST /api/payments/flutterwave-init — Generate Flutterwave payment link (keeps secret key server-side)
+router.post('/flutterwave-init', verifyAuth, async (req, res) => {
+  try {
+    const { role, is_founding_member } = req.body;
+    const { data: user } = await supabase
+      .from('users').select('full_name, email').eq('id', req.userId).single();
+
+    const VERIFY_FEE = 3.99;
+    const DRIVER_FEE = is_founding_member ? 10.00 : 20.00;
+    const amount     = role === 'passenger' ? VERIFY_FEE
+                     : VERIFY_FEE + DRIVER_FEE;
+
+    const tx_ref = `CX-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
+
+    const response = await fetch('https://api.flutterwave.com/v3/payments', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tx_ref,
+        amount:          amount.toFixed(2),
+        currency:        'USD',
+        redirect_url:    'concordxpress://payment-complete',
+        payment_options: 'mobilemoney,card',
+        customer: {
+          email: user?.email || 'user@concordxpress.ca',
+          name:  user?.full_name || 'ConcordXpress User',
+        },
+        customizations: {
+          title:       'ConcordXpress',
+          description: role === 'passenger'
+            ? 'Identity verification fee'
+            : `Verification + driver subscription (${is_founding_member ? 'founder' : 'standard'})`,
+        },
+        meta: { user_id: req.userId, role, is_founding_member },
+      }),
+    });
+
+    const data = await response.json();
+    if (data.status !== 'success') {
+      return res.status(400).json({ error: data.message || 'Failed to initialize payment' });
+    }
+
+    res.json({ link: data.data.link, tx_ref });
+  } catch (err) {
+    console.error('[Flutterwave] init error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/flutterwave-verify — Verify Flutterwave transaction after redirect
+router.post('/flutterwave-verify', verifyAuth, async (req, res) => {
+  try {
+    const { tx_ref } = req.body;
+    const response = await fetch(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      { headers: { 'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}` } }
+    );
+    const data = await response.json();
+    if (data.status === 'success' && data.data?.status === 'successful') {
+      await supabase.from('users')
+        .update({ verification_fee_paid: true }).eq('id', req.userId);
+      return res.json({ success: true, transaction: data.data });
+    }
+    res.status(400).json({ error: 'Transaction not successful', status: data.data?.status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
