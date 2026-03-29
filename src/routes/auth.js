@@ -202,6 +202,32 @@ router.delete('/logout', async (req, res) => {
   res.json({ success: true });
 });
 
+
+// POST /api/auth/check-duplicate — Check if email or phone already registered
+router.post('/check-duplicate', async (req, res) => {
+  try {
+    const { type, value } = req.body;
+    if (!type || !value) return res.status(400).json({ error: 'type and value required' });
+
+    if (type === 'email') {
+      const { data } = await supabase
+        .from('users').select('id').eq('email', value.toLowerCase().trim()).maybeSingle();
+      return res.json({ exists: !!data });
+    }
+
+    if (type === 'phone') {
+      const { data } = await supabase
+        .from('users').select('id').eq('phone', value.trim()).maybeSingle();
+      return res.json({ exists: !!data });
+    }
+
+    res.status(400).json({ error: 'type must be email or phone' });
+  } catch (err) {
+    console.error('[check-duplicate]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // POST /api/auth/extract-intent — Voice search intent extraction
