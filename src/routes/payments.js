@@ -184,4 +184,114 @@ router.post('/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
+
+// POST /api/payments/identity-session — Create Stripe Identity verification session
+router.post('/identity-session', verifyAuth, async (req, res) => {
+  try {
+    const session = await stripe.identity.verificationSessions.create({
+      type: 'document',
+      metadata: { user_id: req.userId },
+      options: {
+        document: {
+          allowed_types: ['driving_license', 'passport', 'id_card'],
+          require_id_number:         false,
+          require_live_capture:      true,
+          require_matching_selfie:   true,
+        },
+      },
+    });
+    await supabase.from('users')
+      .update({ identity_session_id: session.id, identity_status: 'pending' })
+      .eq('id', req.userId);
+    res.json({ client_secret: session.client_secret, session_id: session.id });
+  } catch (err) {
+    console.error('[Identity] session error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments/identity-status — Check verification session status
+router.get('/identity-status', verifyAuth, async (req, res) => {
+  try {
+    const { data: user } = await supabase
+      .from('users').select('identity_session_id, identity_status').eq('id', req.userId).single();
+    if (!user?.identity_session_id) return res.json({ status: 'not_started' });
+    const session = await stripe.identity.verificationSessions.retrieve(user.identity_session_id);
+    if (session.status !== user.identity_status) {
+      await supabase.from('users')
+        .update({ identity_status: session.status }).eq('id', req.userId);
+    }
+    res.json({ status: session.status, session_id: user.identity_session_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/verification-fee — Charge verification fee (+ optional driver subscription)
+router.post('/verification-fee', verifyAuth, async (req, res) => {
+  try {
+    const { payment_method_id, role, is_founding_member } = req.body;
+    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
+
+    const VERIFY_FEE  = 399;  // C$3.99 in cents
+    const DRIVER_FEE  = is_founding_member ? 1000 : 2000; // C$10 or C$20
+    const totalCents  = role === 'passenger'
+      ? VERIFY_FEE
+      : role === 'driver' || role === 'both'
+      ? VERIFY_FEE + DRIVER_FEE
+      : VERIFY_FEE;
+
+    const { data: user } = await supabase
+      .from('users').select('stripe_customer_id, full_name, email').eq('id', req.userId).single();
+
+    let customerId = user?.stripe_customer_id;
+    if (!customerId) {
+      const c = await stripe.customers.create({
+        email: user?.email, name: user?.full_name,
+        metadata: { user_id: req.userId },
+      });
+      customerId = c.id;
+      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount:           totalCents,
+      currency:         'cad',
+      customer:         customerId,
+      payment_method:   payment_method_id,
+      confirm:          true,
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      description:      role === 'passenger'
+        ? 'ConcordXpress identity verification'
+        : `ConcordXpress verification + driver subscription (${is_founding_member ? 'founder' : 'standard'})`,
+      metadata: { user_id: req.userId, role, is_founding_member: String(!!is_founding_member) },
+    });
+
+    if (!['succeeded','processing'].includes(paymentIntent.status)) {
+      return res.status(400).json({ error: 'Payment failed. Please check your card.' });
+    }
+
+    await supabase.from('users')
+      .update({ verification_fee_paid: true })
+      .eq('id', req.userId);
+
+    if (role === 'driver' || role === 'both') {
+      const expiresAt = new Date();
+      expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+      await supabase.from('driver_profiles')
+        .update({
+          subscription_paid:    true,
+          subscription_expires: expiresAt.toISOString(),
+          is_founding_member:   !!is_founding_member,
+        })
+        .eq('user_id', req.userId);
+    }
+
+    res.json({ success: true, payment_intent_id: paymentIntent.id, amount: totalCents });
+  } catch (err) {
+    console.error('[VerificationFee] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
