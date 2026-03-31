@@ -40,8 +40,7 @@ router.post('/send-otp', async (req, res) => {
   try {
     const { phone, isNewUser } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
-    const digits = phone.replace(/\D/g, '');
-    const e164 = digits.startsWith('1') ? '+' + digits : '+1' + digits;
+    const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
 
     // If signing up (not signing in), check phone not already registered
     if (isNewUser) {
