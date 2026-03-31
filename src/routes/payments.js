@@ -367,4 +367,16 @@ router.post('/flutterwave-verify', verifyAuth, async (req, res) => {
   }
 });
 
+// GET /api/payments/flutterwave-redirect — Catches Flutterwave redirect and closes webview
+router.get('/flutterwave-redirect', (req, res) => {
+  const { status, tx_ref, transaction_id } = req.query;
+  // Return a page that the app's webview can detect and close
+  res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width"></head><body>
+    <script>
+      window.location.href = 'concordxpress://payment-complete?status=${status}&tx_ref=${tx_ref}&transaction_id=${transaction_id}';
+      setTimeout(() => { document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;padding:40px">Payment ${status}. Returning to app...</p>'; }, 500);
+    </script>
+  </body></html>`);
+});
+
 module.exports = router;
