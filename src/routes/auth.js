@@ -78,7 +78,8 @@ router.post('/verify-otp', async (req, res) => {
     const { phone, otp, fullName, email, isNewUser } = req.body;
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
     const digits = phone.replace(/\D/g, '');
-    const e164 = digits.startsWith('1') ? '+' + digits : '+1' + digits;
+    // Accept full international numbers — don't assume +1
+    const e164 = phone.startsWith('+') ? phone : (digits.length === 10 ? '+1' + digits : '+' + digits);
 
     // Verify OTP
     const stored = otpStore.get(e164);
@@ -166,13 +167,28 @@ router.post('/send-email-otp', async (req, res) => {
 
 router.post('/verify-email-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const { email, otp, fullName, country, language } = req.body;
     if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
     const e = email.toLowerCase().trim();
     const stored = otpStore.get(e);
     if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
     if (Date.now() > stored.expires) { otpStore.delete(e); return res.status(400).json({ error: 'Code expired.' }); }
     if (stored.attempts >= 5) { otpStore.delete(e); return res.status(400).json({ error: 'Too many attempts.' }); }
+    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
+    otpStore.delete(e);
+    const safeName = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
+    let { data: user } = await supabase.from('users').select('*').eq('email', e).single();
+    if (!user) {
+      const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert({ id: uuidv4(), email: e, full_name: safeName, country: country || 'CA', language: language || 'en', is_founding_member: (count ?? 0) < 100 })
+        .select().single();
+      if (insertError) throw insertError;
+      user = newUser;
+    }
+    const { accessToken, refreshToken } = makeTokens(user.id);
+    return res.json({ success: true, access_token: accessToken, refresh_token: refreshToken, user });
     if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
     otpStore.delete(e);
     const { data: user } = await supabase.from('users').select('*').eq('email', e).single();
