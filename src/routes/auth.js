@@ -189,12 +189,6 @@ router.post('/verify-email-otp', async (req, res) => {
     }
     const { accessToken, refreshToken } = makeTokens(user.id);
     return res.json({ success: true, access_token: accessToken, refresh_token: refreshToken, user });
-    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
-    otpStore.delete(e);
-    const { data: user } = await supabase.from('users').select('*').eq('email', e).single();
-    if (!user) return res.status(404).json({ error: 'No account found with this email.' });
-    const { accessToken, refreshToken } = makeTokens(user.id);
-    res.json({ success: true, access_token: accessToken, refresh_token: refreshToken, user });
   } catch (err) {
     res.status(500).json({ error: 'Verification failed: ' + err.message });
   }
