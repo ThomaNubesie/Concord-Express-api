@@ -156,9 +156,8 @@ router.post('/send-email-otp', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
     const e = email.toLowerCase().trim();
-    const { data: user } = await supabase.from('users').select('id').eq('email', e).single();
-    if (!user) return res.json({ success: true, message: 'If this email is registered, a code has been sent.' });
     const otp = generateOTP(e);
+    // Always send OTP regardless of whether user exists — account created on verify
     res.json({ success: true, message: 'Code sent to your email', dev_otp: otp });
   } catch (err) {
     res.status(500).json({ error: 'Failed to send email code' });
