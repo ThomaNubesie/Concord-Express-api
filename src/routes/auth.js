@@ -189,7 +189,7 @@ router.post('/verify-email-otp', async (req, res) => {
       const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
       const { data: newUser, error: insertError } = await supabase
         .from('users')
-        .insert({ id: uuidv4(), email: e, full_name: safeName, is_founding_member: (count ?? 0) < 100 })
+        .insert({ id: uuidv4(), email: e, phone: `email:${e}`, full_name: safeName, is_founding_member: (count ?? 0) < 100 })
         .select().single();
       if (insertError) throw insertError;
       user = newUser;
