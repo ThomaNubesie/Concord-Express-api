@@ -30,7 +30,7 @@ async function deleteOTP(key) {
 }
 
 function makeTokens(userId) {
-  const accessToken  = jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '1h' });
+  const accessToken  = jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
   const refreshToken = jwt.sign({ sub: userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });
   return { accessToken, refreshToken };
 }
