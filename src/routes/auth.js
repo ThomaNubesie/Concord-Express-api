@@ -85,9 +85,8 @@ router.post('/verify-otp', async (req, res) => {
   try {
     const { phone, otp, fullName, email, isNewUser } = req.body;
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
-    const digits = phone.replace(/\D/g, '');
-    // Accept full international numbers — don't assume +1
-    const e164 = phone.startsWith('+') ? phone : (digits.length === 10 ? '+1' + digits : '+' + digits);
+    // Use phone as-is if already in E.164 format, otherwise normalize
+    const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
 
     // Verify OTP
     const stored = await getOTP(e164);
