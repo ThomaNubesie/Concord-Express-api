@@ -15,7 +15,7 @@ router.post('/setup-intent', verifyAuth, async (req, res) => {
     }
     const intent = await stripe.setupIntents.create({ customer: customerId, payment_method_types: ['card'] });
     res.json({ client_secret: intent.client_secret, customer_id: customerId });
-  } catch (err) { res.status(500).json({ error: 'Failed to create setup intent' }); }
+  } catch (err) { console.error('[SetupIntent]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 router.get('/methods', verifyAuth, async (req, res) => {
