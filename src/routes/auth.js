@@ -105,27 +105,36 @@ router.post('/verify-otp', async (req, res) => {
     let user;
 
     if (existingUser) {
-      // Existing user -- update email if provided and not already set
+      // Existing user — update email if provided and not already set
       if (safeEmail && !existingUser.email) {
-        // Check email not used by another account
-        const { data: emailConflict } = await supabase
-          .from('users').select('id').eq('email', safeEmail).single();
-        if (emailConflict && emailConflict.id !== existingUser.id) {
+        // Check if email belongs to an email-only account (phone starts with 'email:')
+        const { data: emailAccount } = await supabase
+          .from('users').select('*').eq('email', safeEmail).single();
+        if (emailAccount && emailAccount.phone && emailAccount.phone.startsWith('email:')) {
+          // Merge: delete the email-only account and link email to phone account
+          await supabase.from('users').delete().eq('id', emailAccount.id);
+          await supabase.from('users').update({ email: safeEmail }).eq('id', existingUser.id);
+          existingUser.email = safeEmail;
+        } else if (emailAccount && emailAccount.id !== existingUser.id) {
           return res.status(409).json({
             error: 'This email is already linked to another account.',
             code: 'EMAIL_EXISTS',
           });
+        } else {
+          await supabase.from('users').update({ email: safeEmail }).eq('id', existingUser.id);
+          existingUser.email = safeEmail;
         }
-        await supabase.from('users').update({ email: safeEmail }).eq('id', existingUser.id);
-        existingUser.email = safeEmail;
       }
       user = existingUser;
     } else {
-      // New user -- check email uniqueness if provided
+      // New user — check email uniqueness if provided
       if (safeEmail) {
         const { data: emailConflict } = await supabase
-          .from('users').select('id').eq('email', safeEmail).single();
-        if (emailConflict) {
+          .from('users').select('*').eq('email', safeEmail).single();
+        if (emailConflict && emailConflict.phone && emailConflict.phone.startsWith('email:')) {
+          // Email-only account exists — merge by deleting it and using phone account
+          await supabase.from('users').delete().eq('id', emailConflict.id);
+        } else if (emailConflict) {
           return res.status(409).json({
             error: 'This email is already linked to another account. Use a different email or leave it blank.',
             code: 'EMAIL_EXISTS',
