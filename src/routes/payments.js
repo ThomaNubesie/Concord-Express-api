@@ -319,7 +319,7 @@ router.post('/flutterwave-init', verifyAuth, async (req, res) => {
         tx_ref,
         amount:          amount.toFixed(2),
         currency:        'USD',
-        redirect_url:    'concordxpress://payment-complete',
+        redirect_url:    'https://concord-express-api-production.up.railway.app/api/payments/flutterwave-redirect',
         payment_options: 'mobilemoney,card',
         customer: {
           email: user?.email || 'user@concordxpress.ca',
