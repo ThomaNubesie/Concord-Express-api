@@ -10,15 +10,23 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
-const otpStore = new Map();
 const JWT_SECRET = process.env.JWT_SECRET || 'concordxpress-secret';
 
-function generateOTP(key) {
+async function generateOTP(key) {
   const otp     = Math.floor(100000 + Math.random() * 900000).toString();
-  const expires = Date.now() + 10 * 60 * 1000;
-  otpStore.set(key, { otp, expires, attempts: 0 });
+  const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  await supabase.from('otp_store').upsert({ key, otp, expires, attempts: 0 }, { onConflict: 'key' });
   console.log('[OTP] ' + key + ': ' + otp);
   return otp;
+}
+
+async function getOTP(key) {
+  const { data } = await supabase.from('otp_store').select('*').eq('key', key).single();
+  return data;
+}
+
+async function deleteOTP(key) {
+  await supabase.from('otp_store').delete().eq('key', key);
 }
 
 function makeTokens(userId) {
@@ -47,7 +55,7 @@ router.post('/send-otp', async (req, res) => {
       }
     }
 
-    const otp = generateOTP(e164);
+    const otp = await generateOTP(e164);
 
     // Send via Twilio if configured
     if (twilioClient) {
@@ -82,12 +90,12 @@ router.post('/verify-otp', async (req, res) => {
     const e164 = phone.startsWith('+') ? phone : (digits.length === 10 ? '+1' + digits : '+' + digits);
 
     // Verify OTP
-    const stored = otpStore.get(e164);
+    const stored = await getOTP(e164);
     if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
-    if (Date.now() > stored.expires) { otpStore.delete(e164); return res.status(400).json({ error: 'Code expired.' }); }
-    if (stored.attempts >= 5) { otpStore.delete(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
-    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
-    otpStore.delete(e164);
+    if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e164); return res.status(400).json({ error: 'Code expired.' }); }
+    if (stored.attempts >= 5) { await deleteOTP(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
+    if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e164); return res.status(400).json({ error: 'Invalid code.' }); }
+    await deleteOTP(e164);
 
     const safeName  = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
     const safeEmail = email ? email.toLowerCase().trim() : null;
@@ -156,7 +164,7 @@ router.post('/send-email-otp', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
     const e = email.toLowerCase().trim();
-    const otp = generateOTP(e);
+    const otp = await generateOTP(e);
     // Always send OTP regardless of whether user exists — account created on verify
     res.json({ success: true, message: 'Code sent to your email', dev_otp: otp });
   } catch (err) {
@@ -169,12 +177,12 @@ router.post('/verify-email-otp', async (req, res) => {
     const { email, otp, fullName, country, language } = req.body;
     if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
     const e = email.toLowerCase().trim();
-    const stored = otpStore.get(e);
+    const stored = await getOTP(e);
     if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
-    if (Date.now() > stored.expires) { otpStore.delete(e); return res.status(400).json({ error: 'Code expired.' }); }
-    if (stored.attempts >= 5) { otpStore.delete(e); return res.status(400).json({ error: 'Too many attempts.' }); }
-    if (stored.otp !== otp) { stored.attempts++; return res.status(400).json({ error: 'Invalid code.' }); }
-    otpStore.delete(e);
+    if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e); return res.status(400).json({ error: 'Code expired.' }); }
+    if (stored.attempts >= 5) { await deleteOTP(e); return res.status(400).json({ error: 'Too many attempts.' }); }
+    if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e); return res.status(400).json({ error: 'Invalid code.' }); }
+    await deleteOTP(e);
     const safeName = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
     let { data: user } = await supabase.from('users').select('*').eq('email', e).single();
     if (!user) {
