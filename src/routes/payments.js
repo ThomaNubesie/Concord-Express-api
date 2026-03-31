@@ -191,6 +191,7 @@ router.post('/identity-session', verifyAuth, async (req, res) => {
     const session = await stripe.identity.verificationSessions.create({
       type: 'document',
       metadata: { user_id: req.userId },
+      return_url: 'https://concord-express-api-production.up.railway.app/api/payments/identity-redirect',
       options: {
         document: {
           allowed_types: ['driving_license', 'passport', 'id_card'],
@@ -203,7 +204,7 @@ router.post('/identity-session', verifyAuth, async (req, res) => {
     await supabase.from('users')
       .update({ identity_session_id: session.id, identity_status: 'pending' })
       .eq('id', req.userId);
-    res.json({ client_secret: session.client_secret, session_id: session.id });
+    res.json({ url: session.url, client_secret: session.client_secret, session_id: session.id });
   } catch (err) {
     console.error('[Identity] session error:', err.message);
     res.status(500).json({ error: err.message });
@@ -375,6 +376,16 @@ router.get('/flutterwave-redirect', (req, res) => {
     <script>
       window.location.href = 'concordxpress://payment-complete?status=${status}&tx_ref=${tx_ref}&transaction_id=${transaction_id}';
       setTimeout(() => { document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;padding:40px">Payment ${status}. Returning to app...</p>'; }, 500);
+    </script>
+  </body></html>`);
+});
+
+// GET /api/payments/identity-redirect — Catches Stripe Identity redirect
+router.get('/identity-redirect', (req, res) => {
+  res.send(`<!DOCTYPE html><html><body>
+    <script>
+      window.location.href = 'concordxpress://identity-complete';
+      setTimeout(() => { document.body.innerHTML = '<p style="font-family:sans-serif;text-align:center;padding:40px">Verification complete. Returning to app...</p>'; }, 500);
     </script>
   </body></html>`);
 });
