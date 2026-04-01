@@ -171,6 +171,50 @@ router.post('/payout', verifyAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+// POST /api/payments/package-charge — Charge passenger for package delivery
+router.post('/package-charge', verifyAuth, async (req, res) => {
+  try {
+    const { payment_method_id, amount_cad, trip_id, package_type } = req.body;
+    if (!payment_method_id || !amount_cad || !trip_id || !package_type) {
+      return res.status(400).json({ error: 'payment_method_id, amount_cad, trip_id and package_type are required' });
+    }
+
+    const { data: user } = await supabase
+      .from('users').select('stripe_customer_id, full_name, email').eq('id', req.userId).single();
+
+    let customerId = user?.stripe_customer_id;
+    if (!customerId) {
+      const cust = await stripe.customers.create({
+        email: user?.email, name: user?.full_name,
+        metadata: { user_id: req.userId },
+      });
+      customerId = cust.id;
+      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
+    }
+
+    const intent = await stripe.paymentIntents.create({
+      amount:   Math.round(amount_cad * 100),
+      currency: 'cad',
+      customer: customerId,
+      payment_method: payment_method_id,
+      confirm: true,
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      description: `ConcordXpress package delivery — ${package_type}`,
+      metadata: { user_id: req.userId, trip_id, package_type },
+    });
+
+    if (!['succeeded','processing'].includes(intent.status)) {
+      return res.status(400).json({ error: 'Payment failed.' });
+    }
+
+    res.json({ success: true, payment_intent_id: intent.id });
+  } catch (err) {
+    console.error('[PackageCharge]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
