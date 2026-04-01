@@ -493,6 +493,162 @@ router.post('/:id/noshow', verifyAuth, async (req, res) => {
   }
 });
 
+
+// POST /api/bookings/init-flutterwave — Create pending booking + generate FW payment link
+router.post('/init-flutterwave', verifyAuth, async (req, res) => {
+  try {
+    const { trip_id, pickup_stop_id, dropoff_stop_id, seats = 1, credit_to_apply = 0 } = req.body;
+    if (!trip_id || !pickup_stop_id || !dropoff_stop_id) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const { data: trip } = await supabase
+      .from('trips')
+      .select('*, driver:users!trips_driver_id_fkey(id, full_name, country)')
+      .eq('id', trip_id).single();
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const minsUntil = (new Date(trip.departure_at) - Date.now()) / 60000;
+    if (minsUntil < 10) return res.status(400).json({ error: 'Booking closed' });
+
+    const seatsAvailable = trip.seats_total - trip.seats_booked;
+    if (seatsAvailable < seats) return res.status(400).json({ error: `Only ${seatsAvailable} seats available` });
+    if (trip.driver_id === req.userId) return res.status(400).json({ error: 'Cannot book your own trip' });
+
+    const { data: existing } = await supabase.from('bookings')
+      .select('id').eq('trip_id', trip_id).eq('passenger_id', req.userId)
+      .in('status', ['confirmed','active','pending_payment']).single();
+    if (existing) return res.status(400).json({ error: 'Already booked' });
+
+    const { data: user } = await supabase
+      .from('users').select('full_name, email, country, language').eq('id', req.userId).single();
+
+    const fareAmount  = trip.price_per_seat * seats;
+    const bookingFee  = trip.cash_only ? 5.00 : parseFloat(process.env.BOOKING_FEE ?? '3.00') * seats;
+    const creditUsed  = Math.min(credit_to_apply, fareAmount + bookingFee);
+    const totalAmount = Math.max(0, fareAmount + bookingFee - creditUsed);
+
+    // Get currency for passenger's country
+    const COUNTRY_CURRENCY_MAP = {
+      SN:'XOF', CI:'XOF', GH:'GHS', NG:'NGN', CM:'XAF', KE:'KES', RW:'RWF', MA:'MAD',
+    };
+    const currency = COUNTRY_CURRENCY_MAP[user?.country] || 'USD';
+    const RATES = { XOF:447, GHS:11.2, NGN:1148, XAF:447, KES:97, RWF:1040, MAD:7.4, USD:0.74 };
+    const fwAmount = (totalAmount * (RATES[currency] || 1)).toFixed(2);
+
+    const tx_ref = `CX-BK-${Date.now()}-${Math.random().toString(36).slice(2,7).toUpperCase()}`;
+
+    // Create pending booking first
+    const needsApproval = trip.booking_type === 'approval';
+    const { data: booking, error: bookingError } = await supabase.from('bookings').insert({
+      trip_id, passenger_id: req.userId, pickup_stop_id, dropoff_stop_id,
+      seats, fare_amount: fareAmount, booking_fee: bookingFee,
+      total_amount: totalAmount, credit_applied: creditUsed,
+      status:            'pending_payment',
+      approval_status:   needsApproval ? 'pending' : 'approved',
+      payment_provider:  'flutterwave',
+      flutterwave_tx_ref: tx_ref,
+      agreement_signed_at: new Date().toISOString(),
+    }).select().single();
+    if (bookingError) throw bookingError;
+
+    // Generate Flutterwave payment link
+    const fwRes = await fetch('https://api.flutterwave.com/v3/payments', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tx_ref,
+        amount:          fwAmount,
+        currency,
+        redirect_url:    'https://concord-express-api-production.up.railway.app/api/payments/flutterwave-redirect',
+        payment_options: 'mobilemoney,card',
+        customer:        { email: user?.email, name: user?.full_name },
+        customizations: {
+          title:       'ConcordXpress',
+          description: `Seat booking: ${trip.from_city} → ${trip.to_city}`,
+        },
+        meta: { booking_id: booking.id, user_id: req.userId, trip_id },
+      }),
+    });
+    const fwData = await fwRes.json();
+    if (fwData.status !== 'success') {
+      await supabase.from('bookings').delete().eq('id', booking.id);
+      return res.status(400).json({ error: fwData.message || 'Payment init failed' });
+    }
+
+    res.json({ link: fwData.data.link, tx_ref, booking_id: booking.id });
+  } catch (err) {
+    console.error('[FW Booking Init]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/bookings/verify-flutterwave — Verify FW payment and confirm booking
+router.post('/verify-flutterwave', verifyAuth, async (req, res) => {
+  try {
+    const { tx_ref, booking_id } = req.body;
+    if (!tx_ref || !booking_id) return res.status(400).json({ error: 'tx_ref and booking_id required' });
+
+    // Verify with Flutterwave
+    const fwRes = await fetch(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      { headers: { 'Authorization': `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}` } }
+    );
+    const fwData = await fwRes.json();
+    if (fwData.status !== 'success' || fwData.data?.status !== 'successful') {
+      await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', booking_id);
+      return res.status(400).json({ error: 'Payment not successful', fw_status: fwData.data?.status });
+    }
+
+    // Fetch booking
+    const { data: booking } = await supabase.from('bookings')
+      .select('*, trip:trips!bookings_trip_id_fkey(driver_id, seats_booked, from_city, to_city, departure_at, driver:users!trips_driver_id_fkey(full_name, fcm_token, country))')
+      .eq('id', booking_id).single();
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.passenger_id !== req.userId) return res.status(403).json({ error: 'Not your booking' });
+
+    const needsApproval = booking.approval_status === 'pending';
+    const newStatus     = needsApproval ? 'pending' : 'confirmed';
+
+    await supabase.from('bookings')
+      .update({ status: newStatus, flutterwave_tx_ref: tx_ref })
+      .eq('id', booking_id);
+
+    if (!needsApproval) {
+      await supabase.from('trips')
+        .update({ seats_booked: booking.trip.seats_booked + booking.seats })
+        .eq('id', booking.trip_id);
+    }
+
+    // Notify driver
+    const { data: pickupStop } = await supabase
+      .from('pickup_stops').select('area, departs_at').eq('id', booking.pickup_stop_id).single();
+    const departureTime = pickupStop?.departs_at
+      ? new Date(pickupStop.departs_at).toLocaleTimeString('en-CA', { hour:'2-digit', minute:'2-digit', hour12:true })
+      : '';
+
+    if (needsApproval) {
+      await Notif.bookingApprovalRequest(
+        booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
+        booking.trip.from_city, booking.trip.to_city,
+        pickupStop?.area ?? 'your stop', departureTime
+      ).catch(() => {});
+    } else {
+      await Notif.newBooking(
+        booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
+        booking.trip.from_city, booking.trip.to_city,
+        pickupStop?.area ?? 'your stop', departureTime,
+        fmtAmount(booking.total_amount, booking.trip.driver?.country || 'CA')
+      ).catch(() => {});
+    }
+
+    res.json({ success: true, status: newStatus, booking_id });
+  } catch (err) {
+    console.error('[FW Booking Verify]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ── GET /api/bookings — Get current user's bookings ───────────────────────────
