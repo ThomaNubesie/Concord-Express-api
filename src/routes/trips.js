@@ -566,4 +566,104 @@ router.post('/:id/close', verifyAuth, async (req, res) => {
   }
 });
 
+router.post('/:id/cancel', verifyAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, note } = req.body;
+
+    if (!reason) return res.status(400).json({ error: 'Cancellation reason is required' });
+
+    // Get trip with bookings
+    const { data: trip, error: tripErr } = await supabase
+      .from('trips')
+      .select('*, bookings(id, passenger_id, status, fare_amount, seats)')
+      .eq('id', id)
+      .eq('driver_id', req.userId)
+      .single();
+
+    if (tripErr || !trip) return res.status(404).json({ error: 'Trip not found' });
+    if (trip.status !== 'upcoming') return res.status(400).json({ error: 'Only upcoming trips can be cancelled' });
+
+    // Determine quarter
+    const now = new Date();
+    const month = now.getMonth(); // 0-11
+    const quarter = month < 3 ? 'q1' : month < 6 ? 'q2' : month < 9 ? 'q3' : 'q4';
+    const col = `cancellations_${quarter}`;
+
+    // Get driver cancellation count
+    const { data: driver } = await supabase
+      .from('users').select(`id, ${col}, account_suspended`).eq('id', req.userId).single();
+
+    const currentCount = driver?.[col] || 0;
+    const isLate = (new Date(trip.departure_at) - now) < 24 * 60 * 60 * 1000;
+
+    // Check if limit exceeded
+    if (currentCount >= 7) {
+      return res.status(403).json({
+        error: 'Quarterly cancellation limit reached. Pay C$25 reinstatement fee to continue.',
+        code: 'CANCELLATION_LIMIT',
+        requires_payment: true,
+      });
+    }
+
+    // Cancel the trip
+    await supabase.from('trips').update({
+      status: 'cancelled',
+      cancellation_reason: reason,
+      cancellation_note: note || null,
+      cancelled_at: now.toISOString(),
+    }).eq('id', id);
+
+    // Increment cancellation counter
+    await supabase.from('users').update({ [col]: currentCount + 1 }).eq('id', req.userId);
+
+    // Refund and notify all confirmed passengers
+    const confirmedBookings = (trip.bookings || []).filter(b => ['confirmed','active'].includes(b.status));
+
+    for (const booking of confirmedBookings) {
+      // Cancel booking
+      await supabase.from('bookings').update({ status: 'cancelled', cancellation_reason: 'driver_cancelled' }).eq('id', booking.id);
+
+      // Find alternative trips on same route
+      const { data: altTrips } = await supabase
+        .from('trips')
+        .select('id, departure_at, price_per_seat, seats_total, seats_booked, driver:driver_id(full_name, rating_as_driver, total_trips_driver)')
+        .eq('from_city', trip.from_city)
+        .eq('to_city', trip.to_city)
+        .eq('status', 'upcoming')
+        .neq('driver_id', req.userId)
+        .gte('departure_at', now.toISOString())
+        .order('departure_at', { ascending: true })
+        .limit(3);
+
+      // Send notification to passenger
+      await supabase.from('notifications').insert({
+        user_id: booking.passenger_id,
+        type: 'trip_cancelled',
+        title: 'Your trip was cancelled',
+        body: `${trip.from_city} → ${trip.to_city} on ${new Date(trip.departure_at).toLocaleDateString()} was cancelled. Reason: ${reason}. You have been fully refunded.`,
+        data: JSON.stringify({
+          trip_id: trip.id,
+          reason,
+          note: note || null,
+          alternative_trips: (altTrips || []).map(t => t.id),
+          is_late: isLate,
+        }),
+        read: false,
+      });
+    }
+
+    res.json({
+      success: true,
+      cancellations_used: currentCount + 1,
+      cancellations_remaining: 7 - (currentCount + 1),
+      quarter,
+      passengers_notified: confirmedBookings.length,
+    });
+  } catch (err) {
+    console.error('[Cancel trip]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
