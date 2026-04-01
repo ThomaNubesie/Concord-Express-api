@@ -613,8 +613,7 @@ router.post('/verify-flutterwave', verifyAuth, async (req, res) => {
 
     if (!needsApproval) {
       await supabase.from('trips')
-        .update({ seats_booked: booking.trip.seats_booked + booking.seats })
-        .eq('id', booking.trip_id);
+        .rpc('increment_seats_booked', { trip_id: booking.trip_id, seats: booking.seats });
     }
 
     // Notify driver
