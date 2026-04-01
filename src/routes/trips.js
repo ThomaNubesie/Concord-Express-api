@@ -266,7 +266,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', verifyAuth, async (req, res) => {
   try {
     const { from_city, to_city, departure_at, seats_total, price_per_seat,
-            pickup_stops, dropoff_stops, preferences = {}, notes,
+            pickup_stops, dropoff_stops, preferences = {}, notes, accepts_packages, package_types, max_package_kg,
             booking_type = 'direct',
     cashOnly = false,
             is_transit = false, is_recurring = false, recurring_days } = req.body;
@@ -297,6 +297,9 @@ router.post('/', verifyAuth, async (req, res) => {
       departure_at, seats_total, price_per_seat,
       price_floor: bounds.floor, price_ceiling: bounds.ceiling,
       notes, booking_type, is_transit, is_recurring, recurring_days,
+      accepts_packages: accepts_packages ?? false,
+      package_types:    package_types    ?? [],
+      max_package_kg:   max_package_kg   ?? 10,
       pref_ac:          preferences.ac           ?? true,
       pref_music:       preferences.music        ?? true,
       pref_pets:        preferences.pets         ?? false,
@@ -304,6 +307,9 @@ router.post('/', verifyAuth, async (req, res) => {
       pref_no_eating:   preferences.noEating     ?? false,
       pref_no_drinks:   preferences.noDrinks     ?? false,
       pref_shoes_on:    preferences.shoesOn      ?? false,
+      accepts_packages: accepts_packages ?? false,
+      package_types:    package_types    ?? [],
+      max_package_kg:   max_package_kg   ?? 10,
       pref_quiet_ride:  preferences.quietRide    ?? false,
       pref_brief_calls: preferences.briefCalls   ?? false,
       pref_temperature: preferences.temperature  ?? 'any',
