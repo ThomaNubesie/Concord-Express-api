@@ -612,10 +612,13 @@ router.post('/:id/cancel', verifyAuth, async (req, res) => {
       cancellation_reason: reason,
       cancellation_note: note || null,
       cancelled_at: now.toISOString(),
+      had_passengers: confirmedBookings.length > 0,
     }).eq('id', id);
 
-    // Increment cancellation counter
-    await supabase.from('users').update({ [col]: currentCount + 1 }).eq('id', req.userId);
+    // Only increment cancellation counter if there were passengers
+    if (confirmedBookings.length > 0) {
+      await supabase.from('users').update({ [col]: currentCount + 1 }).eq('id', req.userId);
+    }
 
     // Refund and notify all confirmed passengers
     const confirmedBookings = (trip.bookings || []).filter(b => ['confirmed','active'].includes(b.status));
