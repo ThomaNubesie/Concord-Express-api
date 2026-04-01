@@ -13,6 +13,8 @@ app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(morgan('combined'));
 app.use(express.json());
+app.use('/api/bookings', rateLimit({ windowMs: 60000, max: 30, message: { error: 'Too many requests' } }));
+app.use('/api/auth',     rateLimit({ windowMs: 60000, max: 20, message: { error: 'Too many requests' } }));
 
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'Too many login attempts. Please wait 15 minutes.' } });

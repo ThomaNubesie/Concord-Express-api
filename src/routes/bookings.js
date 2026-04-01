@@ -176,10 +176,7 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Increment seats_booked only for confirmed bookings (not pending approval)
     if (!needsApproval) {
-      await supabase
-        .from('trips')
-        .update({ seats_booked: trip.seats_booked + seats })
-        .eq('id', trip_id);
+      await supabase.rpc('increment_seats_booked', { trip_id, seats });
     }
 
     // Mark loyalty credits as used
@@ -211,7 +208,7 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Notify driver of new booking (or approval request)
     if (needsApproval) {
-      await Notif.bookingApprovalRequest(
+      setImmediate(() => Notif.bookingApprovalRequest(
         trip.driver_id,
         user.full_name,
         trip.from_city,
@@ -220,7 +217,7 @@ router.post('/', verifyAuth, async (req, res) => {
         departureTime,
       ).catch(() => {});
     } else {
-      await Notif.newBooking(
+      setImmediate(() => Notif.newBooking(
         trip.driver_id,
         user.full_name,
         trip.from_city,
@@ -232,7 +229,7 @@ router.post('/', verifyAuth, async (req, res) => {
     }
 
     // Notify passenger of confirmed booking
-    await Notif.bookingConfirmed(
+    setImmediate(() => Notif.bookingConfirmed(
       req.userId,
       trip.driver.full_name,
       trip.from_city,
@@ -628,13 +625,13 @@ router.post('/verify-flutterwave', verifyAuth, async (req, res) => {
       : '';
 
     if (needsApproval) {
-      await Notif.bookingApprovalRequest(
+      setImmediate(() => Notif.bookingApprovalRequest(
         booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
         booking.trip.from_city, booking.trip.to_city,
         pickupStop?.area ?? 'your stop', departureTime
       ).catch(() => {});
     } else {
-      await Notif.newBooking(
+      setImmediate(() => Notif.newBooking(
         booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
         booking.trip.from_city, booking.trip.to_city,
         pickupStop?.area ?? 'your stop', departureTime,
