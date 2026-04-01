@@ -251,8 +251,15 @@ router.get('/:id', async (req, res) => {
     const { data: trip, error } = await supabase
       .from('trips')
       .select(`*, driver:users!trips_driver_id_fkey(
-        id, full_name, avatar_url, rating_as_driver, total_trips_driver, is_verified
-      ), pickup_stops(*), dropoff_stops(*)`)
+        id, full_name, avatar_url, rating_as_driver, total_trips_driver, is_verified,
+        driver_profile:driver_profiles(vehicle_make, vehicle_model, vehicle_year, vehicle_color)
+      ), pickup_stops(*), dropoff_stops(*), bookings(
+        id, status, seats, fare_amount, approval_status, package_type,
+        sender_name, recipient_name,
+        passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger),
+        pickup_stop:pickup_stops(area),
+        dropoff_stop:dropoff_stops(area)
+      )`)
       .eq('id', req.params.id)
       .single();
     if (error || !trip) return res.status(404).json({ error: 'Trip not found' });

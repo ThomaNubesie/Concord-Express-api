@@ -115,6 +115,16 @@ const Notif = {
       actionUrl: '/driver/home',
     }),
 
+  bookingApprovalRequest: (driverId, passengerName, fromCity, toCity, stop, time) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '✋',
+      title:     `Approval Request — ${passengerName}`,
+      body:      `${passengerName} wants to join your ${fromCity} → ${toCity} trip. Boards at ${stop} · ${time}. Approve or decline in your trip details.`,
+      actionUrl: '/driver/my-trips',
+    }),
+
   bookingCancelled: (driverId, passengerName, fromCity, toCity, time) =>
     sendNotification({
       userId:    driverId,

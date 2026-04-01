@@ -139,6 +139,14 @@ router.post('/', verifyAuth, async (req, res) => {
       }
     }
 
+    // Determine approval flow
+    const needsApproval = trip.booking_type === 'approval';
+    const bookingStatus = needsApproval ? 'pending'    : 'confirmed';
+    const approvalStatus= needsApproval ? 'pending'    : 'approved';
+
+    // For approval trips, hold the PaymentIntent but don't capture yet
+    // (already created as requires_capture for card, automatic for cash)
+
     // Create booking record
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
@@ -151,7 +159,8 @@ router.post('/', verifyAuth, async (req, res) => {
         fare_amount:              fareAmount,
         booking_fee:              bookingFee,
         total_amount:             totalAmount,
-        status:                   'confirmed',
+        status:                   bookingStatus,
+        approval_status:          approvalStatus,
         stripe_payment_intent_id: paymentIntent.id,
         agreement_signed_at:      new Date().toISOString(),
         credit_applied:           creditUsed,
@@ -163,6 +172,14 @@ router.post('/', verifyAuth, async (req, res) => {
       // Cancel the payment intent if booking failed
       await stripe.paymentIntents.cancel(paymentIntent.id);
       throw bookingError;
+    }
+
+    // Increment seats_booked only for confirmed bookings (not pending approval)
+    if (!needsApproval) {
+      await supabase
+        .from('trips')
+        .update({ seats_booked: trip.seats_booked + seats })
+        .eq('id', trip_id);
     }
 
     // Mark loyalty credits as used
@@ -192,16 +209,27 @@ router.post('/', verifyAuth, async (req, res) => {
         })
       : '';
 
-    // Notify driver of new booking
-    await Notif.newBooking(
-      trip.driver_id,
-      user.full_name,
-      trip.from_city,
-      trip.to_city,
-      pickupStop?.area ?? 'your stop',
-      departureTime,
-      totalAmount.toFixed(2)
-    );
+    // Notify driver of new booking (or approval request)
+    if (needsApproval) {
+      await Notif.bookingApprovalRequest(
+        trip.driver_id,
+        user.full_name,
+        trip.from_city,
+        trip.to_city,
+        pickupStop?.area ?? 'your stop',
+        departureTime,
+      ).catch(() => {});
+    } else {
+      await Notif.newBooking(
+        trip.driver_id,
+        user.full_name,
+        trip.from_city,
+        trip.to_city,
+        pickupStop?.area ?? 'your stop',
+        departureTime,
+        totalAmount.toFixed(2)
+      );
+    }
 
     // Notify passenger of confirmed booking
     await Notif.bookingConfirmed(
