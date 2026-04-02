@@ -56,7 +56,7 @@ router.get('/', async (req, res) => {
       seats   = 1,
       priority = 'time',  // time | price | comfort
       page    = 1,
-      limit   = 20,
+      limit   = 50,
     } = req.query;
 
     if (!from_city || !to_city) {
@@ -121,12 +121,27 @@ router.get('/', async (req, res) => {
     });
 
     // Apply priority sorting
+    // Always boost real driver trips to top within same hour
+    const isRealDriver = (t) => !!t.driver?.email;
     if (priority === 'price') {
-      filtered.sort((a, b) => a.price_per_seat - b.price_per_seat);
+      filtered.sort((a, b) => {
+        if (!!a.driver?.email !== !!b.driver?.email) return a.driver?.email ? -1 : 1;
+        return a.price_per_seat - b.price_per_seat;
+      });
     } else if (priority === 'comfort') {
-      filtered.sort((a, b) => getComfortScore(b) - getComfortScore(a));
+      filtered.sort((a, b) => {
+        if (!!a.driver?.email !== !!b.driver?.email) return a.driver?.email ? -1 : 1;
+        return getComfortScore(b) - getComfortScore(a);
+      });
+    } else {
+      // time priority — real drivers first within same hour bucket
+      filtered.sort((a, b) => {
+        const aReal = !!a.driver?.email;
+        const bReal = !!b.driver?.email;
+        if (aReal !== bReal) return aReal ? -1 : 1;
+        return new Date(a.departure_at).getTime() - new Date(b.departure_at).getTime();
+      });
     }
-    // 'time' keeps departure_at sort from query
 
     // Paginate
     const start = (parseInt(page) - 1) * parseInt(limit);
