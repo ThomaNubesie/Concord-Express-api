@@ -87,7 +87,7 @@ router.get('/', async (req, res) => {
       .eq('to_city', to_city.toLowerCase())
       .eq('status', 'upcoming')
       .gte('departure_at', new Date(Date.now() + 10 * 60000).toISOString())
-      .gte('seats_total', parseInt(seats));
+      .gte('seats_total', 1); // fetch all, filter by availability below
 
     // Date filter
     if (date) {
@@ -112,15 +112,13 @@ router.get('/', async (req, res) => {
     if (error) throw error;
 
     // Filter trips with available seats
-    // Show all trips but mark availability
     let filtered = trips || [];
-    // For seat filtering: only hide trips where seats needed > available AND trip is not fully booked (fake)
-    if (parseInt(seats) > 1) {
-      filtered = filtered.filter(t => {
-        const avail = t.seats_total - t.seats_booked;
-        return avail === 0 || avail >= parseInt(seats);
-      });
-    }
+    const seatsNeeded = parseInt(seats) || 1;
+    filtered = filtered.filter(t => {
+      const avail = t.seats_total - t.seats_booked;
+      // Always show full trips (greyed out) and trips with enough seats
+      return avail === 0 || avail >= seatsNeeded;
+    });
 
     // Apply priority sorting
     if (priority === 'price') {
@@ -140,7 +138,7 @@ router.get('/', async (req, res) => {
       seats_available: trip.seats_total - trip.seats_booked,
       availability:    getTripAvailability(trip),
       comfort_score:   getComfortScore(trip),
-      is_fake: trip.seats_booked >= trip.seats_total,
+      is_fake: false, // fake status handled by driver account, not seat count
       avatar_url: trip.driver?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(trip.driver?.full_name || "driver")}0026backgroundColor=b6e3f4,c0aede,d1d4f9`,
     }));
 
