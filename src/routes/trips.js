@@ -6,18 +6,18 @@ const { verifyAuth } = require('../middleware/auth');
 
 // Route price bounds
 const ROUTE_PRICES = {
-  'ottawa-toronto':       { floor: 40, ceiling: 56 },
-  'ottawa-montreal':      { floor: 22, ceiling: 31 },
-  'ottawa-kingston':      { floor: 18, ceiling: 25 },
-  'ottawa-cornwall':      { floor: 12, ceiling: 17 },
-  'ottawa-peterborough':  { floor: 25, ceiling: 35 },
-  'toronto-ottawa':       { floor: 40, ceiling: 56 },
-  'toronto-montreal':     { floor: 55, ceiling: 77 },
-  'montreal-ottawa':      { floor: 22, ceiling: 31 },
-  'montreal-quebec':      { floor: 25, ceiling: 35 },
-  'montreal-chicoutimi':  { floor: 35, ceiling: 49 },
-  'kingston-ottawa':      { floor: 18, ceiling: 25 },
-  'kingston-toronto':     { floor: 25, ceiling: 35 },
+  'ottawa-toronto':       { floor: 35, ceiling: 75 },
+  'ottawa-montreal':      { floor: 25, ceiling: 45 },
+  'ottawa-kingston':      { floor: 18, ceiling: 40 },
+  'ottawa-cornwall':      { floor: 12, ceiling: 28 },
+  'ottawa-peterborough':  { floor: 25, ceiling: 55 },
+  'toronto-ottawa':       { floor: 35, ceiling: 75 },
+  'toronto-montreal':     { floor: 50, ceiling: 80 },
+  'montreal-ottawa':      { floor: 25, ceiling: 45 },
+  'montreal-quebec':      { floor: 22, ceiling: 45 },
+  'montreal-chicoutimi':  { floor: 30, ceiling: 55 },
+  'kingston-ottawa':      { floor: 18, ceiling: 40 },
+  'kingston-toronto':     { floor: 22, ceiling: 45 },
   'moncton-fredericton':  { floor: 18, ceiling: 25 },
   'fredericton-moncton':  { floor: 18, ceiling: 25 },
 };
@@ -73,7 +73,7 @@ router.get('/', async (req, res) => {
           rating_as_driver, total_trips_driver,
           is_verified,
           driver_profile:driver_profiles(
-            vehicle_make, vehicle_model, vehicle_year, vehicle_color
+            vehicle_make, vehicle_model, vehicle_year, vehicle_color, vehicle_image_url, vehicle_seats
           )
         ),
         pickup_stops(*),
@@ -252,7 +252,7 @@ router.get('/:id', async (req, res) => {
       .from('trips')
       .select(`*, driver:users!trips_driver_id_fkey(
         id, full_name, avatar_url, rating_as_driver, total_trips_driver, is_verified,
-        driver_profile:driver_profiles(vehicle_make, vehicle_model, vehicle_year, vehicle_color)
+        driver_profile:driver_profiles(vehicle_make, vehicle_model, vehicle_year, vehicle_color, vehicle_image_url, vehicle_seats)
       ), pickup_stops(*), dropoff_stops(*), bookings(
         id, status, seats, fare_amount, approval_status, package_type,
         sender_name, recipient_name,
