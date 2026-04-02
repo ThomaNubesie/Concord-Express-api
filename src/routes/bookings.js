@@ -215,7 +215,7 @@ router.post('/', verifyAuth, async (req, res) => {
         trip.to_city,
         pickupStop?.area ?? 'your stop',
         departureTime,
-      ).catch(() => {});
+      ).catch(() => {}));
     } else {
       setImmediate(() => Notif.newBooking(
         trip.driver_id,
@@ -225,7 +225,7 @@ router.post('/', verifyAuth, async (req, res) => {
         pickupStop?.area ?? 'your stop',
         departureTime,
         totalAmount.toFixed(2)
-      );
+      ));
     }
 
     // Notify passenger of confirmed booking
@@ -239,7 +239,7 @@ router.post('/', verifyAuth, async (req, res) => {
       }),
       departureTime,
       totalAmount.toFixed(2)
-    );
+    ));
 
     // Also notify driver of agreement signed
     await Notif.agreementSigned(
@@ -628,14 +628,14 @@ router.post('/verify-flutterwave', verifyAuth, async (req, res) => {
         booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
         booking.trip.from_city, booking.trip.to_city,
         pickupStop?.area ?? 'your stop', departureTime
-      ).catch(() => {});
+      ).catch(() => {}));
     } else {
       setImmediate(() => Notif.newBooking(
         booking.trip.driver_id, booking.trip.driver?.full_name || 'A passenger',
         booking.trip.from_city, booking.trip.to_city,
         pickupStop?.area ?? 'your stop', departureTime,
         fmtAmount(booking.total_amount, booking.trip.driver?.country || 'CA')
-      ).catch(() => {});
+      ).catch(() => {}));
     }
 
     res.json({ success: true, status: newStatus, booking_id });
