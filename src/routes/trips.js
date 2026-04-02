@@ -241,7 +241,7 @@ router.get('/driver/mine', verifyAuth, async (req, res) => {
     let query = supabase
       .from('trips')
       .select(`*, pickup_stops(*), dropoff_stops(*), bookings(
-        id, status, seats, fare_amount,
+        id, status, approval_status, seats, fare_amount,
         passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger),
         pickup_stop:pickup_stops(area),
         dropoff_stop:dropoff_stops(area)
