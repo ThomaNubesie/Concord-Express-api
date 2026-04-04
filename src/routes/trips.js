@@ -687,3 +687,18 @@ router.post('/:id/cancel', verifyAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/trips/:id/suggestions — Passenger submits improvement suggestion
+router.post('/:id/suggestions', verifyAuth, async (req, res) => {
+  const { booking_id, tags, message } = req.body;
+  if (!message && (!tags || tags.length === 0)) return res.status(400).json({ error: 'tags or message required' });
+  const { data, error } = await supabase.from('trip_suggestions').insert({
+    trip_id:    req.params.id,
+    booking_id: booking_id || null,
+    user_id:    req.userId,
+    tags:       tags || [],
+    message:    message || null,
+  }).select().single();
+  if (error) return res.status(500).json({ error: 'Failed to save suggestion' });
+  res.status(201).json({ suggestion: data });
+});
