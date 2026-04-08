@@ -422,6 +422,7 @@ packagesRouter.post('/', verifyAuth, async (req, res) => {
           sender_name, sender_phone, recipient_name, recipient_phone,
           notes, payment_method_id, price: clientPrice, cash_only, app_cut } = req.body;
 
+  console.log('[Packages] body:', JSON.stringify({ trip_id, package_type, payment_method_id, price: clientPrice, cash_only, app_cut }));
   if (!trip_id || !package_type) return res.status(400).json({ error: 'trip_id and package_type required' });
 
   // Route-based prices matching constants/packages.ts
