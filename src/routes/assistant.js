@@ -117,49 +117,49 @@ router.post('/', verifyAuth, async (req, res) => {
 
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    // Detect trip search intent and fetch real trips
+    // Detect trip search intent and fetch real trips using Claude to parse
     let tripResults = [];
     let tripSearchCtx = '';
     const lq = query.toLowerCase();
     const searchIntent = lq.includes('trip') || lq.includes('ride') || lq.includes('from') ||
       lq.includes('ottawa') || lq.includes('montreal') || lq.includes('toronto') ||
-      lq.includes('find') || lq.includes('book') || lq.includes('travel');
+      lq.includes('kingston') || lq.includes('quebec') || lq.includes('cornwall') ||
+      lq.includes('find') || lq.includes('book') || lq.includes('travel') ||
+      lq.includes('dakar') || lq.includes('nairobi') || lq.includes('accra') ||
+      lq.includes('abidjan') || lq.includes('paris') || lq.includes('london');
 
     if (searchIntent || searchContext) {
-      // Extract cities from query or context
-      const cityMap = {
-        'ottawa':'ottawa','montréal':'montreal','montreal':'montreal',
-        'toronto':'toronto','kingston':'kingston','quebec':'quebec',
-        'vancouver':'vancouver','calgary':'calgary','dakar':'dakar',
-        'abidjan':'abidjan','nairobi':'nairobi','accra':'accra',
-      };
-      let fromCity = searchContext?.from || '';
-      let toCity   = searchContext?.to   || '';
-      let dateStr  = searchContext?.date || '';
-      let timeOfDay = searchContext?.timeOfDay || 'any';
+      // Use Claude to extract structured search params from natural language
+      const today = new Date();
+      const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+      
+      const extractRes = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        messages: [{
+          role: 'user',
+          content: `Extract trip search parameters from this query. Today is ${today.toISOString().split('T')[0]}, tomorrow is ${tomorrow.toISOString().split('T')[0]}.
 
-      // Parse cities from query
-      for (const [key, val] of Object.entries(cityMap)) {
-        if (lq.includes(key)) {
-          if (!fromCity && (lq.indexOf('from') < lq.indexOf(key) || lq.startsWith(key))) fromCity = val;
-          else if (!toCity) toCity = val;
-        }
-      }
+Available city IDs: ottawa, montreal, toronto, kingston, cornwall, peterborough, quebec, chicoutimi, moncton, fredericton, vancouver, calgary, edmonton, dakar, abidjan, nairobi, accra, paris, london, casablanca
 
-      // Parse date
-      if (lq.includes('tomorrow')) {
-        const t = new Date(); t.setDate(t.getDate() + 1);
-        dateStr = t.toISOString().split('T')[0];
-      } else if (lq.includes('today')) {
-        dateStr = new Date().toISOString().split('T')[0];
-      }
+Query: "${query}"
 
-      // Parse time of day
-      if (lq.includes('morning') || (lq.match(/[6-9]\s*am|1[01]\s*am/))) timeOfDay = 'morning';
-      else if (lq.includes('afternoon') || lq.match(/1[2-6]\s*pm/)) timeOfDay = 'afternoon';
-      else if (lq.includes('evening') || lq.match(/[5-8]\s*pm/)) timeOfDay = 'evening';
-      else if (lq.includes('night') || lq.match(/9\s*pm|10\s*pm|11\s*pm/)) timeOfDay = 'night';
-      else if (lq.match(/9\s*am/)) timeOfDay = 'morning';
+Respond with JSON only:
+{"from":"city_id_or_empty","to":"city_id_or_empty","date":"YYYY-MM-DD_or_empty","timeOfDay":"any|morning|afternoon|evening|night"}`
+        }]
+      });
+
+      let extracted = { from:'', to:'', date:'', timeOfDay:'any' };
+      try {
+        const raw = extractRes.content?.[0]?.text?.trim() || '{}';
+        const clean = raw.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+        extracted = JSON.parse(clean);
+      } catch {}
+
+      const fromCity  = searchContext?.from  || extracted.from  || '';
+      const toCity    = searchContext?.to    || extracted.to    || '';
+      const dateStr   = searchContext?.date  || extracted.date  || '';
+      const timeOfDay = searchContext?.timeOfDay || extracted.timeOfDay || 'any';
 
       if (fromCity && toCity) {
         tripResults = await searchTripsForAssistant(fromCity, toCity, dateStr, timeOfDay);
