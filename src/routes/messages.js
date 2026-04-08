@@ -1,8 +1,33 @@
-const express  = require('express');
-const router   = express.Router();
-const supabase = require('../lib/supabase');
+const express   = require('express');
+const router    = express.Router();
+const supabase  = require('../lib/supabase');
 const { verifyAuth } = require('../middleware/auth');
 const { sendNotification } = require('../lib/notifications');
+const Anthropic = require('@anthropic-ai/sdk');
+
+const LANG_NAMES = {
+  en:'English', fr:'French', ar:'Arabic', es:'Spanish',
+  sw:'Swahili', ha:'Hausa',  wo:'Wolof',  yo:'Yoruba',
+};
+
+async function translateMessage(text, fromLang, toLang) {
+  if (!text?.trim() || fromLang === toLang) return null;
+  if (toLang === 'wo' || toLang === 'ha') toLang = toLang === 'wo' ? 'fr' : 'en';
+  try {
+    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const msg = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages:   [{ role:'user', content:
+        `Translate this message from ${LANG_NAMES[fromLang]||'English'} to ${LANG_NAMES[toLang]||'English'}. Reply with ONLY the translation, no explanation, no quotes:\n\n${text}`
+      }],
+    });
+    return msg.content?.[0]?.text?.trim() || null;
+  } catch (e) {
+    console.error('[translate]', e.message);
+    return null;
+  }
+}
 
 // ── GET /api/messages/:bookingId ──────────────────────────────────────────────
 router.get('/:bookingId', verifyAuth, async (req, res) => {
@@ -90,13 +115,28 @@ router.post('/:bookingId', verifyAuth, async (req, res) => {
     const { data: sender } = await supabase
       .from('users').select('full_name').eq('id', req.userId).single();
 
+    // Translate if languages differ
+    let translatedContent = null;
     if (recipientId) {
+      const { data: recipient } = await supabase
+        .from('users').select('language').eq('id', recipientId).single();
+      const senderLang    = (await supabase.from('users').select('language').eq('id', req.userId).single()).data?.language || 'en';
+      const recipientLang = recipient?.language || 'en';
+      if (senderLang !== recipientLang) {
+        translatedContent = await translateMessage(content.trim(), senderLang, recipientLang);
+        if (translatedContent) {
+          await supabase.from('messages')
+            .update({ translated_content: translatedContent })
+            .eq('id', message.id);
+          message.translated_content = translatedContent;
+        }
+      }
       await sendNotification({
         userId:    recipientId,
         category:  'messages',
         icon:      '💬',
         title:     `${sender?.full_name || 'Someone'} sent you a message`,
-        body:      content.trim().slice(0, 80),
+        body:      (translatedContent || content.trim()).slice(0, 80),
         relatedId: bookingId,
         actionUrl: `/chat?bookingId=${bookingId}`,
       });

@@ -12,7 +12,7 @@ router.get('/me', verifyAuth, async (req, res) => {
 });
 
 router.patch('/me', verifyAuth, async (req, res) => {
-  const allowed = ['full_name', 'email', 'avatar_url', 'fcm_token', 'role', 'city'];
+  const allowed = ['full_name', 'email', 'avatar_url', 'fcm_token', 'role', 'city', 'language', 'country', 'phone'];
   const updates = {};
   for (const field of allowed) {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
