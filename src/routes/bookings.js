@@ -657,11 +657,16 @@ router.get('/', verifyAuth, async (req, res) => {
       .select(`
         *,
         trip:trips(
-          id, from_city, to_city, departure_at,
-          price_per_seat, status,
+          id, from_city, to_city, departure_at, seats_total, seats_booked,
+          price_per_seat, status, cash_only, pref_ac, pref_music, pref_quiet_ride,
+          pref_luggage, pref_wait_mins, notes, accepts_packages,
           driver:users!trips_driver_id_fkey(
-            id, full_name, avatar_url, rating_as_driver, phone
-          )
+            id, full_name, avatar_url, rating_as_driver, total_trips_driver, phone
+          ),
+          pickup_stops(*),
+          dropoff_stops(*),
+          break_stops(*),
+          bookings(id, status, seats, passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url))
         ),
         pickup_stop:pickup_stops!bookings_pickup_stop_id_fkey(id, area, departs_at),
         dropoff_stop:dropoff_stops!bookings_dropoff_stop_id_fkey(id, area)
