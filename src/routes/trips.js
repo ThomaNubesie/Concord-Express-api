@@ -429,7 +429,7 @@ router.get('/driver/mine', verifyAuth, async (req, res) => {
     const { status, page = 1, limit = 20 } = req.query;
     let query = supabase
       .from('trips')
-      .select(`*, pickup_stops(*), dropoff_stops(*), break_stops(*), packages(id, package_type, size, sender_name, recipient_name, pickup_area, delivery_area, status, price, is_fragile, notes), bookings(
+      .select(`*, pickup_stops(*), dropoff_stops(*), break_stops(*), packages(id, package_type, size, sender_name, sender_phone, recipient_name, recipient_phone, pickup_area, delivery_area, status, price, is_fragile, notes), bookings(
         id, status, approval_status, seats, fare_amount,
         passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger),
         pickup_stop:pickup_stops(area),
@@ -455,9 +455,13 @@ router.get('/:id', async (req, res) => {
       .select(`*, driver:users!trips_driver_id_fkey(
         id, full_name, avatar_url, rating_as_driver, total_trips_driver, is_verified,
         driver_profile:driver_profiles(vehicle_make, vehicle_model, vehicle_year, vehicle_color, vehicle_image_url, vehicle_seats)
-      ), pickup_stops(*), dropoff_stops(*), bookings(
+      ), pickup_stops(*), dropoff_stops(*), break_stops(*),
+      packages(id, package_type, size, sender_name, sender_phone, recipient_name, recipient_phone, pickup_area, delivery_area, status, price, is_fragile, notes),
+      bookings(
         id, status, seats, fare_amount, approval_status,
-        passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger)
+        passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger),
+        pickup_stop:pickup_stops(area),
+        dropoff_stop:dropoff_stops(area)
       )`)
       .eq('id', req.params.id)
       .single();
