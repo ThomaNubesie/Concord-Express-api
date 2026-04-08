@@ -429,7 +429,7 @@ router.get('/driver/mine', verifyAuth, async (req, res) => {
     const { status, page = 1, limit = 20 } = req.query;
     let query = supabase
       .from('trips')
-      .select(`*, pickup_stops(*), dropoff_stops(*), packages(id, package_type, size, sender_name, recipient_name, pickup_area, delivery_area, status, price, is_fragile, notes), bookings(
+      .select(`*, pickup_stops(*), dropoff_stops(*), break_stops(*), packages(id, package_type, size, sender_name, recipient_name, pickup_area, delivery_area, status, price, is_fragile, notes), bookings(
         id, status, approval_status, seats, fare_amount,
         passenger:users!bookings_passenger_id_fkey(id, full_name, avatar_url, rating_as_passenger),
         pickup_stop:pickup_stops(area),
@@ -873,6 +873,40 @@ router.post('/:id/cancel', verifyAuth, async (req, res) => {
     console.error('[Cancel trip]', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/trips/:id/break-stops
+router.get('/:id/break-stops', async (req, res) => {
+  const { data, error } = await supabase
+    .from('break_stops')
+    .select('*')
+    .eq('trip_id', req.params.id)
+    .order('stop_order');
+  if (error) return res.status(500).json({ error: 'Failed to fetch break stops' });
+  res.json({ break_stops: data });
+});
+
+// POST /api/trips/:id/break-stops
+router.post('/:id/break-stops', verifyAuth, async (req, res) => {
+  const { location, duration_mins, notes, stop_order } = req.body;
+  if (!location || !duration_mins) return res.status(400).json({ error: 'location and duration_mins required' });
+  const { data: trip } = await supabase.from('trips').select('driver_id').eq('id', req.params.id).single();
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+  const { data, error } = await supabase.from('break_stops').insert({
+    trip_id: req.params.id, location, duration_mins, notes, stop_order: stop_order || 0,
+  }).select().single();
+  if (error) return res.status(500).json({ error: 'Failed to add break stop' });
+  res.status(201).json({ break_stop: data });
+});
+
+// DELETE /api/trips/:id/break-stops/:stopId
+router.delete('/:id/break-stops/:stopId', verifyAuth, async (req, res) => {
+  const { data: trip } = await supabase.from('trips').select('driver_id').eq('id', req.params.id).single();
+  if (!trip) return res.status(404).json({ error: 'Trip not found' });
+  if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
+  await supabase.from('break_stops').delete().eq('id', req.params.stopId);
+  res.json({ success: true });
 });
 
 module.exports = router;
