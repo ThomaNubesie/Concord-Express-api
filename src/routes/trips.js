@@ -521,7 +521,7 @@ router.post('/', verifyAuth, async (req, res) => {
       pref_children:    preferences.children     ?? 'welcome',
       pref_wait_mins:   preferences.waitMins     ?? 5,
       cash_only:        cashOnly ?? false,
-      pref_luggage:     preferences.luggage      ?? 'all',
+      pref_luggage:     Array.isArray(preferences.luggage) ? preferences.luggage : (preferences.luggage ? [preferences.luggage] : ['all']),
     }).select().single();
     if (tripError) throw tripError;
 
