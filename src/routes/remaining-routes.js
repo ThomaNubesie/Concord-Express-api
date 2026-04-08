@@ -420,7 +420,7 @@ const stripeForPkg   = require('../lib/stripe');
 packagesRouter.post('/', verifyAuth, async (req, res) => {
   const { trip_id, package_type, is_fragile, pickup_area, delivery_area,
           sender_name, sender_phone, recipient_name, recipient_phone,
-          notes, payment_method_id, price: clientPrice, cash_only } = req.body;
+          notes, payment_method_id, price: clientPrice, cash_only, app_cut } = req.body;
 
   if (!trip_id || !package_type) return res.status(400).json({ error: 'trip_id and package_type required' });
 
@@ -457,13 +457,16 @@ packagesRouter.post('/', verifyAuth, async (req, res) => {
   const price    = clientPrice || typePrices[bucket];
 
   const isCash = cash_only || trip.cash_only;
+  // For cash packages: charge 25% (app_cut) upfront via Stripe
+  // For card packages: charge full pkgTotal via Stripe
+  const chargeAmount = isCash ? (app_cut || Math.round(price * 0.25 * 100) / 100) : price;
 
   let stripeIntentId = null;
-  if (!isCash && payment_method_id) {
+  if (payment_method_id && chargeAmount > 0) {
     const { data: user } = await supabase
       .from('users').select('stripe_customer_id').eq('id', req.userId).single();
     const intent = await stripeForPkg.paymentIntents.create({
-      amount: Math.round(price * 100), currency: 'cad',
+      amount: Math.round(chargeAmount * 100), currency: 'cad',
       customer: user?.stripe_customer_id,
       payment_method: payment_method_id,
       confirm: true,
