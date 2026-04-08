@@ -79,18 +79,60 @@ router.get('/verification', verifyAuth, async (req, res) => {
 });
 
 router.get('/analytics', verifyAuth, async (req, res) => {
-  const { period = 'week' } = req.query;
-  const now = new Date(); const startDate = new Date();
-  if (period === 'week')  startDate.setDate(now.getDate() - 7);
-  if (period === 'month') startDate.setDate(now.getDate() - 30);
-  if (period === 'year')  startDate.setFullYear(now.getFullYear() - 1);
-  const { data: bookings, error } = await supabase
-    .from('bookings').select('fare_amount, seats, status, created_at, trip:trips(from_city, to_city, departure_at, driver_id)')
-    .eq('status', 'completed').gte('created_at', startDate.toISOString());
-  if (error) return res.status(500).json({ error: 'Failed to fetch analytics' });
-  const myBookings = bookings.filter(b => b.trip?.driver_id === req.userId);
-  const gross      = myBookings.reduce((s, b) => s + parseFloat(b.fare_amount), 0);
-  res.json({ gross, net: gross * 0.9, trips: myBookings.length, passengers: myBookings.reduce((s, b) => s + b.seats, 0) });
+  try {
+    const { period = 'week' } = req.query;
+    const now = new Date(); const startDate = new Date();
+    if (period === 'week')  startDate.setDate(now.getDate() - 7);
+    if (period === 'month') startDate.setDate(now.getDate() - 30);
+    if (period === 'year')  startDate.setFullYear(now.getFullYear() - 1);
+
+    // Get completed trips driven by this driver in period
+    const { data: trips, error: tripsErr } = await supabase
+      .from('trips')
+      .select('id, departure_at, bookings(id, fare_amount, seats, status)')
+      .eq('driver_id', req.userId)
+      .in('status', ['completed', 'active'])
+      .gte('departure_at', startDate.toISOString());
+    if (tripsErr) throw tripsErr;
+
+    // Get package earnings for same trips
+    const tripIds = (trips || []).map(t => t.id);
+    let pkgEarnings = 0;
+    if (tripIds.length) {
+      const { data: pkgs } = await supabase
+        .from('packages')
+        .select('price, status')
+        .in('trip_id', tripIds)
+        .neq('status', 'cancelled');
+      pkgEarnings = (pkgs || []).reduce((s, p) => s + parseFloat(p.price || 0) * 0.75, 0);
+    }
+
+    // Get all-time trip count
+    const { count: allTimeTrips } = await supabase
+      .from('trips')
+      .select('id', { count: 'exact', head: true })
+      .eq('driver_id', req.userId)
+      .eq('status', 'completed');
+
+    let gross = 0, passengers = 0, uniqueTrips = 0;
+    for (const trip of trips || []) {
+      const completedBookings = (trip.bookings || []).filter(b =>
+        ['confirmed', 'active', 'completed'].includes(b.status)
+      );
+      if (completedBookings.length > 0 || true) uniqueTrips++;
+      for (const b of completedBookings) {
+        gross += parseFloat(b.fare_amount || 0);
+        passengers += b.seats || 1;
+      }
+    }
+    gross += pkgEarnings;
+    const net = gross * 0.9;
+
+    res.json({ gross, net, trips: uniqueTrips, passengers, pkg_earnings: pkgEarnings, all_time_trips: allTimeTrips || 0 });
+  } catch (err) {
+    console.error('[analytics]', err);
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
 });
 
 // POST /api/driver/location — Update driver location
