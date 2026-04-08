@@ -733,29 +733,56 @@ router.post('/:id/complete', verifyAuth, async (req, res) => {
 // POST /api/trips/:id/running-late — Driver notifies passengers they are running late
 router.post('/:id/running-late', verifyAuth, async (req, res) => {
   try {
+    const { delay_mins = 20, reason = 'Traffic' } = req.body;
+    const delayMins = Math.max(1, Math.min(180, parseInt(delay_mins) || 20));
+
     const { data: trip } = await supabase
-      .from('trips').select('driver_id, from_city, to_city, departure_at')
+      .from('trips').select('driver_id, from_city, to_city, departure_at, driver:users!trips_driver_id_fkey(full_name)')
       .eq('id', req.params.id).single();
     if (!trip) return res.status(404).json({ error: 'Trip not found' });
     if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
 
+    // Update departure_at by delay_mins
+    const oldDep    = new Date(trip.departure_at);
+    const newDep    = new Date(oldDep.getTime() + delayMins * 60000);
+    const newDepISO = newDep.toISOString();
+    const newDepFmt = newDep.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Store original only on first delay (don't overwrite if already delayed)
+    const updateFields = { departure_at: newDepISO };
+    if (!trip.original_departure_at) {
+      updateFields.original_departure_at = trip.departure_at;
+    }
+    await supabase.from('trips')
+      .update(updateFields)
+      .eq('id', req.params.id);
+
     const { data: bookings } = await supabase
       .from('bookings').select('passenger_id')
       .eq('trip_id', req.params.id)
-      .eq('status', 'confirmed');
+      .in('status', ['confirmed', 'active']);
+
+    const driverName = trip.driver?.full_name || 'Your driver';
+    const fromCity   = trip.from_city;
+    const toCity     = trip.to_city;
 
     if (bookings?.length) {
-      await supabase.from('notifications').insert(
-        bookings.map((b) => ({
-          user_id: b.passenger_id,
-          type: 'trip',
-          title: '⏱ Driver Running Late',
-          body: `Your driver is running late for the ${trip.from_city} → ${trip.to_city} trip. Please stand by.`,
-        }))
-      );
+      await Promise.all(bookings.map(b =>
+        sendNotification({
+          userId:    b.passenger_id,
+          category:  'trips',
+          icon:      '⏱',
+          isUrgent:  true,
+          title:     `Driver running late — +${delayMins} min`,
+          body:      `${driverName} is delayed (${reason}). New departure: ${newDepFmt}. Sorry for the inconvenience.`,
+          relatedId: req.params.id,
+        })
+      ));
     }
-    res.json({ success: true, notified: bookings?.length || 0 });
+
+    res.json({ success: true, notified: bookings?.length || 0, new_departure_at: newDepISO, delay_mins: delayMins });
   } catch (err) {
+    console.error('[running-late]', err);
     res.status(500).json({ error: 'Failed to notify passengers' });
   }
 });

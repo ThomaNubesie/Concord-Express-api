@@ -657,7 +657,7 @@ router.get('/', verifyAuth, async (req, res) => {
       .select(`
         *,
         trip:trips(
-          id, from_city, to_city, departure_at, seats_total, seats_booked,
+          id, from_city, to_city, departure_at, original_departure_at, seats_total, seats_booked,
           price_per_seat, status, cash_only, pref_ac, pref_music, pref_quiet_ride,
           pref_luggage, pref_wait_mins, notes, accepts_packages,
           driver:users!trips_driver_id_fkey(
