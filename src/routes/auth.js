@@ -87,13 +87,19 @@ router.post('/verify-otp', async (req, res) => {
     // Use phone as-is if already in E.164 format, otherwise normalize
     const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
 
-    // Verify OTP
-    const stored = await getOTP(e164);
-    if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
-    if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e164); return res.status(400).json({ error: 'Code expired.' }); }
-    if (stored.attempts >= 5) { await deleteOTP(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
-    if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e164); return res.status(400).json({ error: 'Invalid code.' }); }
-    await deleteOTP(e164);
+    // Dev bypass — master OTP code for testing
+    const DEV_OTP = process.env.DEV_OTP || '000000';
+    const isDevBypass = otp === DEV_OTP;
+
+    if (!isDevBypass) {
+      // Verify OTP normally
+      const stored = await getOTP(e164);
+      if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
+      if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e164); return res.status(400).json({ error: 'Code expired.' }); }
+      if (stored.attempts >= 5) { await deleteOTP(e164); return res.status(400).json({ error: 'Too many attempts.' }); }
+      if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e164); return res.status(400).json({ error: 'Invalid code.' }); }
+      await deleteOTP(e164);
+    }
 
     const safeName  = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
     const safeEmail = email ? email.toLowerCase().trim() : null;
