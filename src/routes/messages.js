@@ -125,3 +125,72 @@ router.get('/:bookingId/unread-count', verifyAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// ── POST /api/messages/:bookingId/upload ──────────────────────────────────────
+const multer  = require('multer');
+const upload  = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post('/:bookingId/upload', verifyAuth, upload.single('file'), async (req, res) => {
+  try {
+    const { bookingId }     = req.params;
+    const { attachment_type, meta } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+    // Verify user is part of booking
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('passenger_id, trip:trips(driver_id)')
+      .eq('id', bookingId).single();
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    const isPassenger = booking.passenger_id === req.userId;
+    const isDriver    = booking.trip?.driver_id === req.userId;
+    if (!isPassenger && !isDriver) return res.status(403).json({ error: 'Not authorized' });
+
+    // Upload to Supabase Storage
+    const ext      = req.file.mimetype.split('/')[1] || 'jpg';
+    const path     = `${bookingId}/${req.userId}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from('chat-attachments')
+      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('chat-attachments')
+      .getPublicUrl(path);
+
+    // Save message with attachment
+    const parsedMeta = meta ? JSON.parse(meta) : {};
+    const { data: message, error } = await supabase
+      .from('messages')
+      .insert({
+        booking_id:      bookingId,
+        sender_id:       req.userId,
+        content:         parsedMeta.caption || '',
+        attachment_type,
+        attachment_url:  publicUrl,
+        attachment_meta: parsedMeta,
+      })
+      .select('*, sender:users!messages_sender_id_fkey(id, full_name, avatar_url)')
+      .single();
+    if (error) throw error;
+
+    // Notify other party
+    const recipientId = isPassenger ? booking.trip?.driver_id : booking.passenger_id;
+    const { data: sender } = await supabase.from('users').select('full_name').eq('id', req.userId).single();
+    if (recipientId) {
+      const typeLabel = attachment_type === 'location' ? 'shared a location' : 'sent a photo';
+      await sendNotification({
+        userId: recipientId, category: 'messages', icon: '📎',
+        title:  `${sender?.full_name || 'Someone'} ${typeLabel}`,
+        body:   parsedMeta.caption || '',
+        relatedId: bookingId,
+        actionUrl: `/chat?bookingId=${bookingId}`,
+      });
+    }
+
+    res.status(201).json({ message, url: publicUrl });
+  } catch (err) {
+    console.error('[messages upload]', err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
