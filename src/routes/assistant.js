@@ -1,9 +1,114 @@
 const express   = require('express');
 const router    = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
+const supabase  = require('../lib/supabase');
 const { verifyAuth } = require('../middleware/auth');
 
+// Search trips for assistant
+async function searchTripsForAssistant(from, to, date, timeOfDay) {
+  try {
+    let query = supabase
+      .from('trips')
+      .select(`
+        id, from_city, to_city, departure_at, price_per_seat,
+        seats_total, seats_booked, cash_only, status,
+        pref_ac, pref_music, pref_quiet_ride,
+        driver:users!trips_driver_id_fkey(id, full_name, rating_as_driver, total_trips_driver),
+        vehicle:driver_profiles!trips_driver_id_fkey(vehicle_make, vehicle_model, vehicle_year, vehicle_color)
+      `)
+      .eq('from_city', from)
+      .eq('to_city', to)
+      .eq('status', 'upcoming')
+      .gt('departure_at', new Date().toISOString())
+      .order('departure_at', { ascending: true })
+      .limit(5);
+
+    if (date) {
+      const start = new Date(date + 'T00:00:00');
+      const end   = new Date(date + 'T23:59:59');
+      query = query.gte('departure_at', start.toISOString()).lte('departure_at', end.toISOString());
+    }
+
+    const { data: trips } = await query;
+    if (!trips?.length) return [];
+
+    // Filter by time of day
+    const TIME_RANGES = {
+      morning:   [6,  12],
+      afternoon: [12, 17],
+      evening:   [17, 21],
+      night:     [21, 24],
+    };
+
+    return trips.filter(t => {
+      if (!timeOfDay || timeOfDay === 'any') return true;
+      const h = new Date(t.departure_at).getHours();
+      const [s, e] = TIME_RANGES[timeOfDay] || [0, 24];
+      return h >= s && h < e;
+    }).map((t, i) => ({
+      index:       i + 1,
+      id:          t.id,
+      from:        t.from_city,
+      to:          t.to_city,
+      departure:   new Date(t.departure_at).toLocaleTimeString('en-CA', { hour:'2-digit', minute:'2-digit', hour12:true }),
+      date:        new Date(t.departure_at).toLocaleDateString('en-CA', { weekday:'short', month:'short', day:'numeric' }),
+      price:       `C$${t.price_per_seat}`,
+      seats_left:  t.seats_total - t.seats_booked,
+      driver:      t.driver?.full_name || 'Unknown',
+      rating:      t.driver?.rating_as_driver?.toFixed(1) || '5.0',
+      trips_done:  t.driver?.total_trips_driver || 0,
+      vehicle:     t.vehicle ? `${t.vehicle.vehicle_year} ${t.vehicle.vehicle_make} ${t.vehicle.vehicle_model}` : 'Unknown vehicle',
+      payment:     t.cash_only ? 'Cash' : 'Card',
+    }));
+  } catch (e) {
+    console.error('[assistant search]', e);
+    return [];
+  }
+}
+
 const SYSTEM_PROMPT = `You are the ConcordXpress AI assistant — a smart, friendly in-app assistant for a multi-country intercity carpooling platform. You help both drivers and passengers with their trips, packages, earnings, emergencies, and app navigation.
+
+You have access to the user context AND real-time trip search results when provided.
+
+## Your capabilities:
+- Search and present available trips with full details
+- Navigate to booking screen with a specific trip
+- Answer questions about trips, bookings, packages, earnings
+- Navigate to any screen in the app
+- Initiate emergency calls (911, tow truck, emergency contacts)
+- Explain app features in the user language
+
+## When presenting trip search results:
+- List each trip clearly: number, time, driver name + rating, vehicle, seats left, price
+- Highlight which best matches the user criteria
+- Always end with: "Would you like to book any of these? Just say the number."
+- If user says "yes" or a number, ask "Which one?" if unclear, then navigate to booking
+
+## Available screens:
+- /passenger/booking (needs tripId param) ← USE THIS to book a specific trip
+- /driver/trip-details (needs tripId param)
+- /search (needs from, to, date, seats params)
+- /chat (needs bookingId param)
+- /dispute (needs bookingId, tripId params)
+- /notifications, /profile, /settings
+
+## Emergency numbers by country:
+- CA/US: 911, UK: 999, FR: 15/17/18, MA: 15/19, Africa: 112
+
+## Response format — ALWAYS valid JSON only:
+{
+  "speech": "Spoken response (conversational, user language, max 3 sentences for trips)",
+  "action": null OR { "type": "navigate", "screen": "/path", "params": {} }
+               OR { "type": "call", "number": "911" }
+               OR { "type": "search_filter", "from": "ottawa", "to": "montreal", "date": "tomorrow", "timeOfDay": "morning" }
+}
+
+## Rules:
+- Always respond in user language
+- For trip results: be conversational but include key details (time, driver, rating, price, seats, car)
+- action type "search_filter" updates the search screen filters without navigating away
+- Never make up data — only use context and search results provided
+- Always return valid JSON only` — a smart, friendly in-app assistant for a multi-country intercity carpooling platform. You help both drivers and passengers with their trips, packages, earnings, emergencies, and app navigation.
 
 You have access to the user's current context: their profile, upcoming trips/bookings, and earnings data provided in the user message.
 
@@ -67,10 +172,71 @@ Action types:
 
 router.post('/', verifyAuth, async (req, res) => {
   try {
-    const { query, context, language, role, history = [] } = req.body;
+    const { query, context, language, role, history = [], searchContext } = req.body;
     if (!query?.trim()) return res.status(400).json({ error: 'Query required' });
 
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+    // Detect trip search intent and fetch real trips
+    let tripResults = [];
+    let tripSearchCtx = '';
+    const lq = query.toLowerCase();
+    const searchIntent = lq.includes('trip') || lq.includes('ride') || lq.includes('from') ||
+      lq.includes('ottawa') || lq.includes('montreal') || lq.includes('toronto') ||
+      lq.includes('find') || lq.includes('book') || lq.includes('travel');
+
+    if (searchIntent || searchContext) {
+      // Extract cities from query or context
+      const cityMap = {
+        'ottawa':'ottawa','montréal':'montreal','montreal':'montreal',
+        'toronto':'toronto','kingston':'kingston','quebec':'quebec',
+        'vancouver':'vancouver','calgary':'calgary','dakar':'dakar',
+        'abidjan':'abidjan','nairobi':'nairobi','accra':'accra',
+      };
+      let fromCity = searchContext?.from || '';
+      let toCity   = searchContext?.to   || '';
+      let dateStr  = searchContext?.date || '';
+      let timeOfDay = searchContext?.timeOfDay || 'any';
+
+      // Parse cities from query
+      for (const [key, val] of Object.entries(cityMap)) {
+        if (lq.includes(key)) {
+          if (!fromCity && (lq.indexOf('from') < lq.indexOf(key) || lq.startsWith(key))) fromCity = val;
+          else if (!toCity) toCity = val;
+        }
+      }
+
+      // Parse date
+      if (lq.includes('tomorrow')) {
+        const t = new Date(); t.setDate(t.getDate() + 1);
+        dateStr = t.toISOString().split('T')[0];
+      } else if (lq.includes('today')) {
+        dateStr = new Date().toISOString().split('T')[0];
+      }
+
+      // Parse time of day
+      if (lq.includes('morning') || (lq.match(/[6-9]\s*am|1[01]\s*am/))) timeOfDay = 'morning';
+      else if (lq.includes('afternoon') || lq.match(/1[2-6]\s*pm/)) timeOfDay = 'afternoon';
+      else if (lq.includes('evening') || lq.match(/[5-8]\s*pm/)) timeOfDay = 'evening';
+      else if (lq.includes('night') || lq.match(/9\s*pm|10\s*pm|11\s*pm/)) timeOfDay = 'night';
+      else if (lq.match(/9\s*am/)) timeOfDay = 'morning';
+
+      if (fromCity && toCity) {
+        tripResults = await searchTripsForAssistant(fromCity, toCity, dateStr, timeOfDay);
+        if (tripResults.length) {
+          tripSearchCtx = `
+
+LIVE TRIP SEARCH RESULTS (${fromCity} → ${toCity}${dateStr ? ' on ' + dateStr : ''}${timeOfDay !== 'any' ? ' ' + timeOfDay : ''}):
+${JSON.stringify(tripResults, null, 2)}
+
+Total: ${tripResults.length} trip(s) found.`;
+        } else {
+          tripSearchCtx = `
+
+No trips found for ${fromCity} → ${toCity}${dateStr ? ' on ' + dateStr : ''}.`;
+        }
+      }
+    }
 
     const msgs = [
       ...history.map((m) => ({
@@ -79,7 +245,10 @@ router.post('/', verifyAuth, async (req, res) => {
       })),
       {
         role:    'user',
-        content: `User context:\n${context}\n\nUser query: ${query}`,
+        content: `User context:
+${context}${tripSearchCtx}
+
+User query: ${query}`,
       },
     ];
 
@@ -100,8 +269,9 @@ router.post('/', verifyAuth, async (req, res) => {
     }
 
     res.json({
-      speech: parsed.speech || "I didn't understand that. Please try again.",
-      action: parsed.action || null,
+      speech:      parsed.speech || "I didn't understand that. Please try again.",
+      action:      parsed.action || null,
+      tripResults: tripResults.length ? tripResults : undefined,
     });
   } catch (err) {
     console.error('[assistant]', err);
