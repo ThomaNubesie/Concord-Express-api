@@ -43,6 +43,7 @@ loadRoute('/api/disputes',      './routes/disputes');
 loadRoute('/api/notifications', './routes/notifications');
 loadRoute('/api/driver',        './routes/driver');
 loadRoute('/api/packages',      './routes/packages');
+loadRoute('/api/assistant',     './routes/assistant');
 loadRoute('/api/loyalty',       './routes/loyalty');
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
