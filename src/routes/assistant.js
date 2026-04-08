@@ -24,8 +24,9 @@ async function searchTripsForAssistant(from, to, date, timeOfDay) {
       .limit(5);
 
     if (date) {
-      const start = new Date(date + 'T00:00:00');
-      const end   = new Date(date + 'T23:59:59');
+      // Use UTC to avoid timezone issues
+      const start = new Date(date + 'T00:00:00Z');
+      const end   = new Date(date + 'T23:59:59Z');
       query = query.gte('departure_at', start.toISOString()).lte('departure_at', end.toISOString());
     }
 
@@ -161,6 +162,8 @@ Respond with JSON only:
       const dateStr   = searchContext?.date  || extracted.date  || '';
       const timeOfDay = searchContext?.timeOfDay || extracted.timeOfDay || 'any';
 
+      console.log('[Assistant search] from:', fromCity, 'to:', toCity, 'date:', dateStr, 'time:', timeOfDay);
+      console.log('[Assistant search] from:', fromCity, 'to:', toCity, 'date:', dateStr, 'time:', timeOfDay);
       if (fromCity && toCity) {
         tripResults = await searchTripsForAssistant(fromCity, toCity, dateStr, timeOfDay);
         if (tripResults.length) {
