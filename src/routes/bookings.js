@@ -291,6 +291,23 @@ router.get('/:id', verifyAuth, async (req, res) => {
   }
 });
 
+// ── PATCH /api/bookings/:id — Update booking fields ─────────────────────────
+router.patch('/:id', verifyAuth, async (req, res) => {
+  try {
+    const allowed = ['rated_at', 'rating_notified_count', 'checked_in_at', 'checkin_extended_mins'];
+    const updates: Record<string,any> = {};
+    for (const field of allowed) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
+    if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No valid fields' });
+    const { data, error } = await supabase.from('bookings').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json({ booking: data });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update booking' });
+  }
+});
+
 // ── PATCH /api/bookings/:id/confirm — Passenger confirms arrival ──────────────
 
 router.patch('/:id/confirm', verifyAuth, async (req, res) => {

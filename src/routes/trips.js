@@ -683,6 +683,45 @@ router.post('/:id/start', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/trips/:id/schedule-rating-reminders (internal — called after complete)
+async function scheduleRatingReminders(tripId, supabase, sendNotification) {
+  const delays = [0, 5 * 3600000, 10 * 3600000]; // 0h, 5h, 10h
+  const messages = [
+    'How was your trip? Rate your driver now.',
+    'Still time to rate your driver — your feedback helps the community.',
+    'Last chance to rate your driver before the window closes.',
+  ];
+  // Get all completed bookings for this trip
+  const { data: bookings } = await supabase
+    .from('bookings')
+    .select('id, passenger_id, rated_at')
+    .eq('trip_id', tripId)
+    .eq('status', 'completed');
+
+  for (let i = 0; i < delays.length; i++) {
+    setTimeout(async () => {
+      for (const b of (bookings || [])) {
+        // Recheck if still unrated
+        const { data: fresh } = await supabase.from('bookings').select('rated_at').eq('id', b.id).single();
+        if (fresh?.rated_at) continue;
+        await sendNotification({
+          userId:    b.passenger_id,
+          category:  'trips',
+          icon:      '⭐',
+          isUrgent:  false,
+          title:     'Rate your driver',
+          body:      messages[i],
+          relatedId: tripId,
+        });
+        // Update notified count
+        await supabase.from('bookings').update({
+          rating_notified_count: (i + 1)
+        }).eq('id', b.id);
+      }
+    }, delays[i]);
+  }
+}
+
 // POST /api/trips/:id/complete — Driver completes the trip + captures payments
 router.post('/:id/complete', verifyAuth, async (req, res) => {
   try {
