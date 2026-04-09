@@ -749,7 +749,7 @@ router.post('/:id/running-late', verifyAuth, async (req, res) => {
     const newDepFmt = newDep.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     // Store original only on first delay (don't overwrite if already delayed)
-    const updateFields = { departure_at: newDepISO };
+    const updateFields: any = { departure_at: newDepISO, delay_reason: reason };
     if (!trip.original_departure_at) {
       updateFields.original_departure_at = trip.departure_at;
     }
@@ -778,6 +778,32 @@ router.post('/:id/running-late', verifyAuth, async (req, res) => {
           relatedId: req.params.id,
         })
       ));
+    }
+
+    // Send SMS to passengers
+    if (bookings?.length) {
+      const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+        ? require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
+        : null;
+      if (twilioClient) {
+        const passengerIds = bookings.map((b) => b.passenger_id);
+        const { data: passengers } = await supabase
+          .from('users').select('phone, full_name').in('id', passengerIds);
+        if (passengers) {
+          await Promise.all(passengers.map(async (p) => {
+            if (!p.phone) return;
+            try {
+              await twilioClient.messages.create({
+                from: process.env.TWILIO_PHONE_NUMBER,
+                to:   p.phone,
+                body: `ConcordXpress: ${driverName} is running late (+${delayMins} min). Reason: ${reason}. New departure: ${newDepFmt}. Sorry for the inconvenience.`,
+              });
+            } catch (smsErr) {
+              console.error('[running-late SMS]', smsErr.message);
+            }
+          }));
+        }
+      }
     }
 
     res.json({ success: true, notified: bookings?.length || 0, new_departure_at: newDepISO, delay_mins: delayMins });
