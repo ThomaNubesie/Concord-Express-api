@@ -427,6 +427,7 @@ function getTimeDiff(date1, date2) {
 router.get('/driver/mine', verifyAuth, async (req, res) => {
   try {
     const { status, page = 1, limit = 20 } = req.query;
+    console.log('[driver/mine] userId:', req.userId, 'status:', status);
     let query = supabase
       .from('trips')
       .select(`*, pickup_stops(*), dropoff_stops(*), break_stops(*), packages(id, package_type, size, sender_name, sender_phone, recipient_name, recipient_phone, pickup_area, delivery_area, status, price, is_fragile, notes), bookings(
@@ -441,6 +442,7 @@ router.get('/driver/mine', verifyAuth, async (req, res) => {
     if (status) query = query.eq('status', status);
     const { data: trips, error } = await query;
     if (error) throw error;
+    console.log('[driver/mine] found trips:', trips?.length, 'for userId:', req.userId);
     res.json({ trips });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch trips' });
