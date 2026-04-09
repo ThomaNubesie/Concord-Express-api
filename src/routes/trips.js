@@ -751,7 +751,7 @@ router.post('/:id/running-late', verifyAuth, async (req, res) => {
     const newDepFmt = newDep.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     // Store original only on first delay (don't overwrite if already delayed)
-    const updateFields: any = { departure_at: newDepISO, delay_reason: reason };
+    const updateFields = { departure_at: newDepISO, delay_reason: reason };
     if (!trip.original_departure_at) {
       updateFields.original_departure_at = trip.departure_at;
     }
