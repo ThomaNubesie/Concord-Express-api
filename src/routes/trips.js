@@ -732,6 +732,109 @@ router.post('/:id/complete', verifyAuth, async (req, res) => {
   }
 });
 
+
+// POST /api/trips/:id/checkin/:bookingId — Driver checks in a passenger
+router.post('/:id/checkin/:bookingId', verifyAuth, async (req, res) => {
+  try {
+    const { data: booking, error } = await supabase
+      .from('bookings')
+      .update({ checked_in_at: new Date().toISOString(), status: 'active' })
+      .eq('id', req.params.bookingId)
+      .eq('trip_id', req.params.id)
+      .select().single();
+    if (error) throw error;
+    // Notify passenger they are checked in
+    await sendNotification({
+      userId:    booking.passenger_id,
+      category:  'trips',
+      icon:      '✅',
+      isUrgent:  false,
+      title:     'You are checked in!',
+      body:      'The driver has confirmed your check-in. Enjoy your trip!',
+      relatedId: req.params.id,
+    });
+    res.json({ success: true, booking });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to check in passenger' });
+  }
+});
+
+// POST /api/trips/:id/noshow/:bookingId — Driver marks passenger as no-show
+router.post('/:id/noshow/:bookingId', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip } = await supabase.from('trips').select('from_city, to_city, driver:users!trips_driver_id_fkey(full_name), bookings(passenger_id, status)').eq('id', req.params.id).single();
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'no_show', is_no_show: true })
+      .eq('id', req.params.bookingId)
+      .eq('trip_id', req.params.id);
+    if (error) throw error;
+    // Notify all active passengers anonymously
+    const activePax = (trip?.bookings || []).filter(b => b.status === 'confirmed' || b.status === 'active');
+    await Promise.all(activePax.map(b =>
+      sendNotification({
+        userId:    b.passenger_id,
+        category:  'trips',
+        icon:      '⏱',
+        isUrgent:  false,
+        title:     'Trip update',
+        body:      'A passenger was unable to make it. The driver will proceed shortly.',
+        relatedId: req.params.id,
+      })
+    ));
+    // SMS all active passengers anonymously via Twilio
+    try {
+      const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
+        ? require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN) : null;
+      if (twilioClient && activePax.length) {
+        const { data: passengers } = await supabase.from('users').select('phone').in('id', activePax.map(b => b.passenger_id));
+        await Promise.all((passengers || []).map(async p => {
+          if (!p.phone) return;
+          await twilioClient.messages.create({
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to:   p.phone,
+            body: `ConcordXpress: A passenger was unable to make it to the pickup. The driver will proceed shortly.`,
+          }).catch(() => {});
+        }));
+      }
+    } catch {}
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to mark no-show' });
+  }
+});
+
+// POST /api/trips/:id/extend-checkin/:bookingId — Passenger requests more time
+router.post('/:id/extend-checkin/:bookingId', verifyAuth, async (req, res) => {
+  try {
+    const { mins = 5 } = req.body;
+    const safeMins = [5, 10].includes(parseInt(mins)) ? parseInt(mins) : 5;
+    // Get current extension
+    const { data: booking } = await supabase.from('bookings')
+      .select('checkin_extended_mins, passenger_id, trip_id').eq('id', req.params.bookingId).single();
+    const currentExt = booking?.checkin_extended_mins || 0;
+    const newExt = Math.min(currentExt + safeMins, 10);
+    if (newExt <= currentExt) return res.status(400).json({ error: 'Maximum extension reached (10 min)' });
+    await supabase.from('bookings').update({ checkin_extended_mins: newExt }).eq('id', req.params.bookingId);
+    // Notify driver
+    const { data: trip } = await supabase.from('trips').select('driver_id').eq('id', req.params.id).single();
+    if (trip?.driver_id) {
+      await sendNotification({
+        userId:    trip.driver_id,
+        category:  'trips',
+        icon:      '⏱',
+        isUrgent:  true,
+        title:     'Passenger needs more time',
+        body:      `A passenger has requested +${safeMins} more minutes. New total extension: ${newExt} min.`,
+        relatedId: req.params.id,
+      });
+    }
+    res.json({ success: true, extended_mins: newExt, added_mins: safeMins });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to extend check-in time' });
+  }
+});
+
 // POST /api/trips/:id/running-late — Driver notifies passengers they are running late
 router.post('/:id/running-late', verifyAuth, async (req, res) => {
   try {
