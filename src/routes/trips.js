@@ -523,7 +523,7 @@ router.post('/', verifyAuth, async (req, res) => {
       pref_temperature: preferences.temperature  ?? 'any',
       pref_extra_stops: preferences.extraStops   ?? 'none',
       pref_children:    preferences.children     ?? 'welcome',
-      pref_wait_mins:   preferences.waitMins     ?? 5,
+      pref_wait_mins:   [3, 5, 10].includes(preferences.waitMins) ? preferences.waitMins : 3,
       cash_only:        cashOnly ?? false,
       pref_luggage:     Array.isArray(preferences.luggage) ? preferences.luggage : (preferences.luggage ? [preferences.luggage] : ['all']),
     }).select().single();
