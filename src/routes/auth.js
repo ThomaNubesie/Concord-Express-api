@@ -258,6 +258,17 @@ router.post('/check-duplicate', async (req, res) => {
   }
 });
 
+// POST /api/auth/change-password
+router.post('/change-password', verifyAuth, async (req, res) => {
+  try {
+    const { new_password } = req.body;
+    if (!new_password || new_password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const { error } = await supabase.auth.admin.updateUserById(req.userId, { password: new_password });
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = router;
 
 // POST /api/auth/extract-intent — Voice search intent extraction

@@ -205,3 +205,29 @@ router.get('/location/:tripId', verifyAuth, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/driver/support/ticket
+router.post('/support/ticket', verifyAuth, async (req, res) => {
+  try {
+    const { category, subject, message } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message required' });
+    const { data: user } = await supabase.from('users').select('full_name, email, phone').eq('id', req.userId).single();
+    await supabase.from('support_tickets').insert({
+      user_id: req.userId, category, subject, message,
+      user_name: user?.full_name, user_email: user?.email,
+    }).select();
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to submit ticket' }); }
+});
+
+// POST /api/driver/support/report
+router.post('/support/report', verifyAuth, async (req, res) => {
+  try {
+    const { type, severity, description, trip_id } = req.body;
+    if (!description) return res.status(400).json({ error: 'Description required' });
+    await supabase.from('problem_reports').insert({
+      user_id: req.userId, type, severity, description, trip_id: trip_id || null,
+    }).select();
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Failed to submit report' }); }
+});
