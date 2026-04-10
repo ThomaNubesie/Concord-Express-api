@@ -53,4 +53,18 @@ router.delete('/me', verifyAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+// PATCH /api/users/language
+router.patch('/language', verifyAuth, async (req, res) => {
+  try {
+    const { language } = req.body;
+    const allowed = ['en','fr','ar','es','sw','ha','wo','yo'];
+    if (!allowed.includes(language)) return res.status(400).json({ error: 'Invalid language' });
+    const { error } = await supabase.from('users').update({ language }).eq('id', req.userId);
+    if (error) throw error;
+    res.json({ success: true, language });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update language' });
+  }
+});
+
 module.exports = router;
