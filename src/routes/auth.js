@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express  = require('express');
+const { verifyAuth } = require('../middleware/auth');
 const router   = express.Router();
 const supabase = require('../lib/supabase');
 const { v4: uuidv4 } = require('uuid');
