@@ -494,7 +494,7 @@ router.post('/', verifyAuth, async (req, res) => {
       });
     }
 
-    // Check max 5 trips per day
+    // Check max 20 trips per day (dev)
     const dayStart = new Date(departure_at); dayStart.setHours(0,0,0,0);
     const dayEnd   = new Date(departure_at); dayEnd.setHours(23,59,59,999);
     const { count } = await supabase.from('trips').select('*', { count: 'exact', head: true })
@@ -502,7 +502,7 @@ router.post('/', verifyAuth, async (req, res) => {
       .gte('departure_at', dayStart.toISOString())
       .lte('departure_at', dayEnd.toISOString())
       .in('status', ['upcoming', 'active']);
-    if (count >= 5) return res.status(400).json({ error: 'You already have 5 trips on this day' });
+    if (count >= 20) return res.status(400).json({ error: 'You already have 20 trips on this day' });
 
     const { data: trip, error: tripError } = await supabase.from('trips').insert({
       driver_id: req.userId, from_city: from_city.toLowerCase(), to_city: to_city.toLowerCase(),
