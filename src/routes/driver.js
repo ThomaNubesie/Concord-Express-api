@@ -128,7 +128,46 @@ router.get('/analytics', verifyAuth, async (req, res) => {
     gross += pkgEarnings;
     const net = gross * 0.9;
 
-    res.json({ gross, net, trips: uniqueTrips, passengers, pkg_earnings: pkgEarnings, all_time_trips: allTimeTrips || 0 });
+    // Build daily earnings breakdown
+    const dailyMap = {};
+    for (const trip of trips || []) {
+      const day = trip.departure_at?.slice(0, 10);
+      if (!day) continue;
+      for (const b of (trip.bookings || []).filter((b) => ['confirmed','active','completed'].includes(b.status))) {
+        dailyMap[day] = (dailyMap[day] || 0) + parseFloat(b.fare_amount || 0) * 0.9;
+      }
+    }
+    const daily = Object.entries(dailyMap).map(([date, amount]) => ({ date, amount: +amount.toFixed(2) })).sort((a,b) => a.date.localeCompare(b.date));
+
+    // Get ratings breakdown
+    const { data: ratings } = await supabase.from('ratings').select('stars').eq('rated_user_id', req.userId);
+    const ratingBreakdown = [5,4,3,2,1].map(s => ({
+      stars: s,
+      count: (ratings || []).filter((r) => r.stars === s).length,
+    }));
+    const avgRating = ratings?.length ? (ratings.reduce((s,r) => s+r.stars, 0) / ratings.length).toFixed(1) : '5.0';
+
+    // Get cancellation count
+    const { count: cancelCount } = await supabase.from('trips').select('id', { count:'exact', head:true })
+      .eq('driver_id', req.userId).eq('status', 'cancelled');
+
+    // Get package stats
+    const { data: pkgStats } = await supabase.from('packages')
+      .select('status, price').in('trip_id', tripIds.length ? tripIds : ['00000000-0000-0000-0000-000000000000']);
+    const pkgDelivered = (pkgStats || []).filter((p) => p.status === 'delivered').length;
+    const pkgPending   = (pkgStats || []).filter((p) => p.status === 'in_transit').length;
+
+    // Get pending balance
+    const { data: dp } = await supabase.from('driver_profiles').select('pending_balance, total_paid_out').eq('user_id', req.userId).single();
+
+    res.json({
+      gross, net, trips: uniqueTrips, passengers, pkg_earnings: pkgEarnings,
+      all_time_trips: allTimeTrips || 0, daily, rating_breakdown: ratingBreakdown,
+      avg_rating: avgRating, cancellation_count: cancelCount || 0,
+      pkg_delivered: pkgDelivered, pkg_pending: pkgPending,
+      pending_balance: dp?.pending_balance || 0,
+      total_paid_out: dp?.total_paid_out || 0,
+    });
   } catch (err) {
     console.error('[analytics]', err);
     res.status(500).json({ error: 'Failed to fetch analytics' });

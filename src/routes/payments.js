@@ -172,6 +172,93 @@ router.post('/payout', verifyAuth, async (req, res) => {
 });
 
 
+// POST /api/payments/payout-request — unified payout (Stripe/Interac/Flutterwave)
+router.post('/payout-request', verifyAuth, async (req, res) => {
+  try {
+    const { amount, method, trip_ids, interac_email, flutterwave_phone } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const { data: profile } = await supabase.from('driver_profiles')
+      .select('stripe_account_id, pending_balance, total_paid_out, interac_contact')
+      .eq('user_id', req.userId).single();
+
+    let payoutRecord = { driver_id: req.userId, amount, method, trip_ids: trip_ids || [], status: 'pending' };
+
+    if (method === 'stripe' || method === 'instant') {
+      if (!profile?.stripe_account_id) return res.status(400).json({ error: 'No Stripe account connected. Set up in profile.' });
+      const payout = await stripe.payouts.create(
+        { amount: Math.round(amount * 100), currency: 'cad', metadata: { driver_id: req.userId } },
+        { stripeAccount: profile.stripe_account_id }
+      );
+      payoutRecord.stripe_payout_id = payout.id;
+      payoutRecord.status = 'processing';
+    } else if (method === 'interac') {
+      const email = interac_email || profile?.interac_contact;
+      if (!email) return res.status(400).json({ error: 'No Interac email on file' });
+      payoutRecord.notes = `Interac e-Transfer to ${email}`;
+      payoutRecord.status = 'pending_manual';
+      // Notify admin
+      console.log(`[payout] Interac request: C$${amount} to ${email} for driver ${req.userId}`);
+    } else if (method === 'flutterwave') {
+      const phone = flutterwave_phone;
+      if (!phone) return res.status(400).json({ error: 'Phone number required for Flutterwave' });
+      payoutRecord.notes = `Flutterwave mobile money to ${phone}`;
+      payoutRecord.status = 'pending_manual';
+      console.log(`[payout] Flutterwave request: C$${amount} to ${phone} for driver ${req.userId}`);
+    }
+
+    // Save payout record
+    const { data: payout, error } = await supabase.from('payout_history').insert(payoutRecord).select().single();
+    if (error) throw error;
+
+    // Update driver balance
+    await supabase.from('driver_profiles').update({
+      pending_balance: Math.max(0, (profile?.pending_balance || 0) - amount),
+      total_paid_out: (profile?.total_paid_out || 0) + amount,
+    }).eq('user_id', req.userId);
+
+    res.json({ success: true, payout });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/payments/payout-history — get driver payout history
+router.get('/payout-history', verifyAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('payout_history')
+      .select('*').eq('driver_id', req.userId).order('created_at', { ascending: false }).limit(20);
+    if (error) throw error;
+    res.json({ payouts: data || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/payments/pending-trips — get trips with unpaid earnings
+router.get('/pending-trips', verifyAuth, async (req, res) => {
+  try {
+    const { data: trips, error } = await supabase.from('trips')
+      .select('id, from_city, to_city, departure_at, bookings(id, passenger_id, fare_amount, seats, status, passenger:users!bookings_passenger_id_fkey(full_name))')
+      .eq('driver_id', req.userId)
+      .eq('status', 'completed')
+      .is('payout_id', null)
+      .order('departure_at', { ascending: false })
+      .limit(30);
+    if (error) throw error;
+
+    const result = (trips || []).map(t => {
+      const bookings = (t.bookings || []).filter(b => ['confirmed','completed'].includes(b.status));
+      const gross = bookings.reduce((s, b) => s + parseFloat(b.fare_amount || 0), 0);
+      return {
+        id: t.id, from_city: t.from_city, to_city: t.to_city,
+        departure_at: t.departure_at, gross,
+        net: +(gross * 0.9).toFixed(2),
+        passengers: bookings.map(b => b.passenger?.full_name || 'Passenger').join(', '),
+        pax_count: bookings.length,
+      };
+    }).filter(t => t.gross > 0);
+
+    res.json({ trips: result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/payments/package-charge — Charge passenger for package delivery
 router.post('/package-charge', verifyAuth, async (req, res) => {
   try {
