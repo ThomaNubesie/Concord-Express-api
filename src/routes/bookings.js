@@ -295,7 +295,7 @@ router.get('/:id', verifyAuth, async (req, res) => {
 router.patch('/:id', verifyAuth, async (req, res) => {
   try {
     const allowed = ['rated_at', 'rating_notified_count', 'checked_in_at', 'checkin_extended_mins'];
-    const updates: Record<string,any> = {};
+    const updates = {};
     for (const field of allowed) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
