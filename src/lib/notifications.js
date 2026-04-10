@@ -3,6 +3,21 @@ const supabase = require('../lib/supabase');
 // ── Send a notification ───────────────────────────────────────────────────────
 // Saves to DB + sends FCM push if user has a token
 
+const Anthropic = require('@anthropic-ai/sdk');
+
+async function translateNotifText(text, toLang) {
+  if (!text || toLang === 'en') return text;
+  try {
+    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      messages: [{ role:'user', content: `Translate this mobile notification text to ${toLang}. Reply with ONLY the translation:\n${text}` }],
+    });
+    return msg.content?.[0]?.text?.trim() || text;
+  } catch { return text; }
+}
+
 async function sendNotification({
   userId,
   category,   // trips | messages | payments | system
