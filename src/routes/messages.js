@@ -10,19 +10,24 @@ const LANG_NAMES = {
   sw:'Swahili', ha:'Hausa',  wo:'Wolof',  yo:'Yoruba',
 };
 
-async function translateMessage(text, fromLang, toLang) {
-  if (!text?.trim() || fromLang === toLang) return null;
-  if (toLang === 'wo' || toLang === 'ha') toLang = toLang === 'wo' ? 'fr' : 'en';
+async function translateMessage(text, toLang) {
+  if (!text?.trim()) return null;
+  if (toLang === 'wo') toLang = 'fr';
+  if (toLang === 'ha') toLang = 'en';
+  const targetLangName = LANG_NAMES[toLang] || 'English';
   try {
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
     const msg = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      max_tokens: 400,
       messages:   [{ role:'user', content:
-        `Translate this message from ${LANG_NAMES[fromLang]||'English'} to ${LANG_NAMES[toLang]||'English'}. Reply with ONLY the translation, no explanation, no quotes:\n\n${text}`
+        `Detect the language of this message and translate it to ${targetLangName}. If the message is already in ${targetLangName}, return it unchanged. Reply with ONLY the translated text, no explanation, no quotes:\n\n${text}`
       }],
     });
-    return msg.content?.[0]?.text?.trim() || null;
+    const result = msg.content?.[0]?.text?.trim() || null;
+    // If result is identical to input, no translation needed
+    if (result === text.trim()) return null;
+    return result;
   } catch (e) {
     console.error('[translate]', e.message);
     return null;
@@ -115,21 +120,18 @@ router.post('/:bookingId', verifyAuth, async (req, res) => {
     const { data: sender } = await supabase
       .from('users').select('full_name').eq('id', req.userId).single();
 
-    // Translate if languages differ
+    // Always attempt translation to recipient's language (auto-detects source)
     let translatedContent = null;
     if (recipientId) {
       const { data: recipient } = await supabase
         .from('users').select('language').eq('id', recipientId).single();
-      const senderLang    = (await supabase.from('users').select('language').eq('id', req.userId).single()).data?.language || 'en';
       const recipientLang = recipient?.language || 'en';
-      if (senderLang !== recipientLang) {
-        translatedContent = await translateMessage(content.trim(), senderLang, recipientLang);
-        if (translatedContent) {
-          await supabase.from('messages')
-            .update({ translated_content: translatedContent })
-            .eq('id', message.id);
-          message.translated_content = translatedContent;
-        }
+      translatedContent = await translateMessage(content.trim(), recipientLang);
+      if (translatedContent) {
+        await supabase.from('messages')
+          .update({ translated_content: translatedContent })
+          .eq('id', message.id);
+        message.translated_content = translatedContent;
       }
       await sendNotification({
         userId:    recipientId,
