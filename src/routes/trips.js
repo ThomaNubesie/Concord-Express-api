@@ -3,6 +3,7 @@ const express    = require('express');
 const router     = express.Router();
 const supabase   = require('../lib/supabase');
 const { verifyAuth } = require('../middleware/auth');
+const { Notif, sendNotification } = require('../lib/notifications');
 
 // Route price bounds — synced with constants/cities.ts ROUTES array
 const ROUTE_PRICES = {
