@@ -1017,6 +1017,9 @@ router.post('/:id/cancel', verifyAuth, async (req, res) => {
       });
     }
 
+    // Refund and notify all confirmed passengers
+    const confirmedBookings = (trip.bookings || []).filter(b => ['confirmed','active'].includes(b.status));
+
     // Cancel the trip
     await supabase.from('trips').update({
       status: 'cancelled',
@@ -1030,9 +1033,6 @@ router.post('/:id/cancel', verifyAuth, async (req, res) => {
     if (confirmedBookings.length > 0) {
       await supabase.from('users').update({ [col]: currentCount + 1 }).eq('id', req.userId);
     }
-
-    // Refund and notify all confirmed passengers
-    const confirmedBookings = (trip.bookings || []).filter(b => ['confirmed','active'].includes(b.status));
 
     for (const booking of confirmedBookings) {
       // Cancel booking
