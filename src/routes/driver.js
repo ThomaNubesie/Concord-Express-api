@@ -219,6 +219,21 @@ router.get('/traffic-conditions', verifyAuth, async (req, res) => {
       peterborough: { lat: 44.3091,  lng: -78.3197 },
       quebec:       { lat: 46.8139,  lng: -71.2080 },
       chicoutimi:   { lat: 48.4279,  lng: -71.0683 },
+      fredericton:  { lat: 45.9636,  lng: -66.6431 },
+      moncton:      { lat: 46.0878,  lng: -64.7782 },
+      // France
+      paris:        { lat: 48.8566,  lng: 2.3522   },
+      lyon:         { lat: 45.7640,  lng: 4.8357   },
+      marseille:    { lat: 43.2965,  lng: 5.3698   },
+      // Senegal
+      dakar:        { lat: 14.7167,  lng: -17.4677 },
+      // Cameroon
+      douala:       { lat: 4.0511,   lng: 9.7679   },
+      yaounde:      { lat: 3.8480,   lng: 11.5021  },
+      bafoussam:    { lat: 5.4737,   lng: 10.4176  },
+      // Ivory Coast
+      abidjan:      { lat: 5.3600,   lng: -4.0083  },
+      yamoussoukro: { lat: 6.8276,   lng: -5.2893  },
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
     };
@@ -439,6 +454,21 @@ router.get('/nearby-places', verifyAuth, async (req, res) => {
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
       chicoutimi:   { lat: 48.4279,  lng: -71.0683 },
+      fredericton:  { lat: 45.9636,  lng: -66.6431 },
+      moncton:      { lat: 46.0878,  lng: -64.7782 },
+      // France
+      paris:        { lat: 48.8566,  lng: 2.3522   },
+      lyon:         { lat: 45.7640,  lng: 4.8357   },
+      marseille:    { lat: 43.2965,  lng: 5.3698   },
+      // Senegal
+      dakar:        { lat: 14.7167,  lng: -17.4677 },
+      // Cameroon
+      douala:       { lat: 4.0511,   lng: 9.7679   },
+      yaounde:      { lat: 3.8480,   lng: 11.5021  },
+      bafoussam:    { lat: 5.4737,   lng: 10.4176  },
+      // Ivory Coast
+      abidjan:      { lat: 5.3600,   lng: -4.0083  },
+      yamoussoukro: { lat: 6.8276,   lng: -5.2893  },
     };
 
     const coords = CITY_COORDS[city.toLowerCase()];
