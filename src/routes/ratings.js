@@ -15,7 +15,7 @@ router.post('/', verifyAuth, async (req, res) => {
   const expiresAt   = new Date(booking.trip.departure_at);
   expiresAt.setHours(expiresAt.getHours() + 48);
   const { data: rating, error } = await supabase.from('ratings')
-    .insert({ booking_id, rater_id: req.userId, ratee_id, role, score, comment, expires_at: expiresAt.toISOString() })
+    .insert({ booking_id, rater_id: req.userId, ratee_id, role, score, comment, tags: tags||[], expires_at: expiresAt.toISOString() })
     .select().single();
   if (error) return res.status(500).json({ error: 'Failed to submit rating' });
   const { data: rater } = await supabase.from('users').select('full_name').eq('id', req.userId).single();
