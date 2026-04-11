@@ -422,6 +422,56 @@ router.get('/platform-insights', verifyAuth, async (req, res) => {
   }
 });
 
+// GET /api/driver/nearby-places — real places near a city
+router.get('/nearby-places', verifyAuth, async (req, res) => {
+  try {
+    const { city, type = 'lodging' } = req.query;
+    if (!city) return res.status(400).json({ error: 'city required' });
+
+    const CITY_COORDS = {
+      ottawa:       { lat: 45.4215,  lng: -75.6972 },
+      toronto:      { lat: 43.6532,  lng: -79.3832 },
+      montreal:     { lat: 45.5017,  lng: -73.5673 },
+      kingston:     { lat: 44.2312,  lng: -76.4860 },
+      cornwall:     { lat: 45.0182,  lng: -74.7266 },
+      peterborough: { lat: 44.3091,  lng: -78.3197 },
+      quebec:       { lat: 46.8139,  lng: -71.2080 },
+      moncton:      { lat: 46.0878,  lng: -64.7782 },
+      fredericton:  { lat: 45.9636,  lng: -66.6431 },
+      chicoutimi:   { lat: 48.4279,  lng: -71.0683 },
+    };
+
+    const coords = CITY_COORDS[city.toLowerCase()];
+    if (!coords) return res.status(400).json({ error: 'Unknown city' });
+
+    const GOOGLE_KEY = process.env.GOOGLE_PLACES_KEY;
+    if (!GOOGLE_KEY) return res.status(500).json({ error: 'Places API not configured' });
+
+    const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${coords.lat},${coords.lng}&radius=2000&type=${type}&key=${GOOGLE_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const places = (data.results || []).slice(0, 8).map(p => ({
+      id:         p.place_id,
+      name:       p.name,
+      address:    p.vicinity,
+      rating:     p.rating,
+      user_ratings_total: p.user_ratings_total,
+      price_level: p.price_level,
+      open_now:   p.opening_hours?.open_now,
+      photo_ref:  p.photos?.[0]?.photo_reference,
+      lat:        p.geometry.location.lat,
+      lng:        p.geometry.location.lng,
+      types:      p.types,
+    }));
+
+    res.json({ places, city, type });
+  } catch (err) {
+    console.error('[nearby-places]', err);
+    res.status(500).json({ error: 'Failed to fetch places' });
+  }
+});
+
 module.exports = router;
 
 // POST /api/driver/support/ticket
