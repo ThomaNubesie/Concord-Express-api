@@ -93,4 +93,49 @@ router.post('/translate/ui-batch', async (req, res) => {
   }
 });
 
+// POST /api/users/block/:userId — block a user
+router.post('/block/:userId', verifyAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (userId === req.userId) return res.status(400).json({ error: 'Cannot block yourself' });
+    const { error } = await supabase.from('blocked_users').upsert({
+      blocker_id: req.userId, blocked_id: userId
+    }, { onConflict: 'blocker_id,blocked_id' });
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/users/block/:userId — unblock a user
+router.delete('/block/:userId', verifyAuth, async (req, res) => {
+  try {
+    const { error } = await supabase.from('blocked_users')
+      .delete().eq('blocker_id', req.userId).eq('blocked_id', req.params.userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/users/blocked — list blocked users
+router.get('/blocked', verifyAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('blocked_users')
+      .select('blocked_id, created_at, blocked:users!blocked_users_blocked_id_fkey(id, full_name, avatar_url)')
+      .eq('blocker_id', req.userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    const blocked = (data || []).map(b => ({ ...b.blocked, blocked_at: b.created_at }));
+    res.json({ blocked });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/users/block-status/:userId — check if user is blocked
+router.get('/block-status/:userId', verifyAuth, async (req, res) => {
+  try {
+    const { data } = await supabase.from('blocked_users')
+      .select('id').eq('blocker_id', req.userId).eq('blocked_id', req.params.userId).single();
+    res.json({ blocked: !!data });
+  } catch { res.json({ blocked: false }); }
+});
+
 module.exports = router;
