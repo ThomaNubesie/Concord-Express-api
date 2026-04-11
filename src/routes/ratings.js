@@ -5,7 +5,7 @@ const { verifyAuth } = require('../middleware/auth');
 const { Notif } = require('../lib/notifications');
 
 router.post('/', verifyAuth, async (req, res) => {
-  const { booking_id, ratee_id, score, comment } = req.body;
+  const { booking_id, ratee_id, score, comment, tags, rated_as } = req.body;
   if (!booking_id || !ratee_id || !score) return res.status(400).json({ error: 'booking_id, ratee_id, and score required' });
   const { data: booking } = await supabase.from('bookings')
     .select('passenger_id, trip:trips(driver_id, departure_at)').eq('id', booking_id).single();
