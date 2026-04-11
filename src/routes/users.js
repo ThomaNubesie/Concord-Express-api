@@ -138,4 +138,25 @@ router.get('/block-status/:userId', verifyAuth, async (req, res) => {
   } catch { res.json({ blocked: false }); }
 });
 
+// GET /api/users/driver-profile-status
+router.get('/driver-profile-status', verifyAuth, async (req, res) => {
+  try {
+    const { data: profile } = await supabase
+      .from('driver_profiles')
+      .select('vehicle_make, vehicle_plate, stripe_account_id, interac_contact, identity_verified')
+      .eq('user_id', req.userId).single();
+
+    const hasVehicle  = !!(profile?.vehicle_make && profile?.vehicle_plate);
+    const hasPayout   = !!(profile?.stripe_account_id || profile?.interac_contact);
+    const hasIdentity = !!(profile?.identity_verified);
+
+    res.json({
+      setup_complete: hasVehicle && hasPayout && hasIdentity,
+      steps: { identity: hasIdentity, vehicle: hasVehicle, payout: hasPayout }
+    });
+  } catch {
+    res.json({ setup_complete: false, steps: { identity:false, vehicle:false, payout:false } });
+  }
+});
+
 module.exports = router;
