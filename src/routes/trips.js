@@ -4,6 +4,7 @@ const router     = express.Router();
 const supabase   = require('../lib/supabase');
 const { verifyAuth } = require('../middleware/auth');
 const { Notif, sendNotification } = require('../lib/notifications');
+const { formatTimeInZone } = require('../lib/timezone');
 
 // Route price bounds — synced with constants/cities.ts ROUTES array
 const ROUTE_PRICES = {
@@ -891,10 +892,9 @@ router.post('/:id/running-late', verifyAuth, async (req, res) => {
     const oldDep    = new Date(trip.departure_at);
     const newDep    = new Date(oldDep.getTime() + delayMins * 60000);
     const newDepISO = newDep.toISOString();
-    const newDepFmt = newDep.toLocaleTimeString('en-CA', { 
-      hour: '2-digit', minute: '2-digit', hour12: true,
-      timeZone: 'America/Toronto'
-    });
+    // Get driver's country for timezone
+    const { data: driver } = await supabase.from('users').select('country').eq('id', req.userId).single();
+    const newDepFmt = formatTimeInZone(newDep, driver?.country, trip.from_city);
 
     // Store original only on first delay (don't overwrite if already delayed)
     const updateFields = { departure_at: newDepISO, delay_reason: reason };

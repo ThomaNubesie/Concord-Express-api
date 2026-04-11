@@ -3,6 +3,7 @@ const router     = express.Router();
 const supabase   = require('../lib/supabase');
 const stripe     = require('../lib/stripe');
 const { verifyAuth } = require('../middleware/auth');
+const { formatTimeInZone, formatDateTimeInZone } = require('../lib/timezone');
 const { Notif }  = require('../lib/notifications');
 
 // ── POST /api/bookings — Create booking ───────────────────────────────────────
