@@ -67,4 +67,30 @@ router.patch('/language', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/users/translate/ui-batch — translate UI strings batch
+router.post('/translate/ui-batch', async (req, res) => {
+  try {
+    const { strings, target_lang } = req.body;
+    if (!strings || !target_lang || target_lang === 'en') {
+      return res.json({ translated: strings });
+    }
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const msg = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 3000,
+      messages: [{
+        role: 'user',
+        content: `Translate these mobile app UI strings from English to ${target_lang}. Return ONLY valid JSON with identical keys. Keep very short and natural. Do not translate proper nouns like ConcordXpress.\n\n${JSON.stringify(strings)}`
+      }],
+    });
+    const text = msg.content?.[0]?.text?.trim() || '{}';
+    const clean = text.replace(/\`\`\`json|\`\`\`/g, '').trim();
+    const translated = JSON.parse(clean);
+    res.json({ translated });
+  } catch (err) {
+    res.json({ translated: req.body.strings });
+  }
+});
+
 module.exports = router;
