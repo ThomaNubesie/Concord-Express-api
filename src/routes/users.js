@@ -74,21 +74,50 @@ router.post('/translate/ui-batch', async (req, res) => {
     if (!strings || !target_lang || target_lang === 'en') {
       return res.json({ translated: strings });
     }
+
     const Anthropic = require('@anthropic-ai/sdk');
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const msg = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 3000,
-      messages: [{
-        role: 'user',
-        content: `Translate these mobile app UI strings from English to ${target_lang}. Return ONLY valid JSON with identical keys. Keep very short and natural. Do not translate proper nouns like ConcordXpress.\n\n${JSON.stringify(strings)}`
-      }],
-    });
-    const text = msg.content?.[0]?.text?.trim() || '{}';
-    const clean = text.replace(/\`\`\`json|\`\`\`/g, '').trim();
-    const translated = JSON.parse(clean);
+
+    // Chunk strings into batches of 80 to avoid token limits
+    const chunkObj = (obj, size) => {
+      const keys = Object.keys(obj);
+      const chunks = [];
+      for (let i = 0; i < keys.length; i += size) {
+        const chunk = {};
+        keys.slice(i, i + size).forEach(k => { chunk[k] = obj[k]; });
+        chunks.push(chunk);
+      }
+      return chunks;
+    };
+
+    const chunks = chunkObj(strings, 80);
+    let translated = {};
+
+    for (const chunk of chunks) {
+      try {
+        const msg = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4000,
+          messages: [{
+            role: 'user',
+            content: `Translate these mobile app UI strings from English to ${target_lang}. Return ONLY valid JSON with identical keys. Keep translations very short and natural for a mobile app. Do not translate: ConcordXpress, C$, XOF, XAF, USD, EUR, SMS, GPS, SOS, OK, ID.
+
+${JSON.stringify(chunk)}`
+          }],
+        });
+        const text = msg.content?.[0]?.text?.trim() || '{}';
+        const clean = text.replace(/\`\`\`json|\`\`\`/g, '').trim();
+        const chunkTranslated = JSON.parse(clean);
+        translated = { ...translated, ...chunkTranslated };
+      } catch (chunkErr) {
+        // If a chunk fails, use original strings for that chunk
+        translated = { ...translated, ...chunk };
+      }
+    }
+
     res.json({ translated });
   } catch (err) {
+    console.error('[translate/ui-batch]', err);
     res.json({ translated: req.body.strings });
   }
 });
