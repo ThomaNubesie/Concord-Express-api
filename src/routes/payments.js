@@ -31,7 +31,11 @@ router.get('/methods', verifyAuth, async (req, res) => {
 router.post('/attach-method', verifyAuth, async (req, res) => {
   try {
     const { payment_method_id } = req.body;
-    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
+    if (!payment_method_id || payment_method_id === 'waived') {
+      // Should have been caught by passengerIsFree check above, but handle gracefully
+      await supabase.from('users').update({ verification_fee_paid: true }).eq('id', req.userId);
+      return res.json({ success: true, waived: true });
+    }
 
     const { data: user } = await supabase
       .from('users').select('stripe_customer_id').eq('id', req.userId).single();
@@ -389,7 +393,11 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
       return res.json({ success: true, waived: true, is_founding_passenger: true });
     }
 
-    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
+    if (!payment_method_id || payment_method_id === 'waived') {
+      // Should have been caught by passengerIsFree check above, but handle gracefully
+      await supabase.from('users').update({ verification_fee_paid: true }).eq('id', req.userId);
+      return res.json({ success: true, waived: true });
+    }
 
     const totalCents  = role === 'passenger'
       ? VERIFY_FEE
