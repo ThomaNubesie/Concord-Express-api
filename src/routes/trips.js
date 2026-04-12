@@ -876,6 +876,40 @@ router.post('/:id/extend-checkin/:bookingId', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/trips/:id/passenger-running-late — passenger notifies driver they're running late
+router.post('/:id/passenger-running-late', verifyAuth, async (req, res) => {
+  try {
+    const { booking_id } = req.body;
+    const { data: trip } = await supabase
+      .from('trips')
+      .select('driver_id, from_city, driver:users!trips_driver_id_fkey(full_name, fcm_token)')
+      .eq('id', req.params.id).single();
+
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+
+    // Get passenger name
+    const { data: passenger } = await supabase
+      .from('users').select('full_name').eq('id', req.userId).single();
+    const passengerName = passenger?.full_name || 'A passenger';
+
+    // Notify driver
+    await sendNotification({
+      userId:    trip.driver_id,
+      category:  'trips',
+      icon:      '🏃',
+      isUrgent:  true,
+      title:     `${passengerName} is running late`,
+      body:      `They're on their way to the pickup stop. Consider waiting a moment.`,
+      relatedId: req.params.id,
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[passenger-running-late]', err);
+    res.status(500).json({ error: 'Failed to notify driver' });
+  }
+});
+
 // POST /api/trips/:id/notify-checkin — notify passengers driver has arrived at pickup
 router.post('/:id/notify-checkin', verifyAuth, async (req, res) => {
   try {
