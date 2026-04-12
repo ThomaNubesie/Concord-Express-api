@@ -33,8 +33,8 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Check booking is still open
     const minsUntil = (new Date(trip.departure_at) - Date.now()) / 60000;
-    if (minsUntil < 10) {
-      return res.status(400).json({ error: 'Booking closed — trip departs in less than 10 minutes' });
+    if (minsUntil < 15) {
+      return res.status(400).json({ error: 'Booking closed — trip departs in less than 15 minutes' });
     }
 
     // Check seats available
