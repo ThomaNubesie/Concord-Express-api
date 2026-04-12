@@ -65,6 +65,16 @@ router.post('/fee', verifyAuth, async (req, res) => {
   }
 });
 
+// GET /api/driver/passenger-count — get current free passenger count
+router.get('/passenger-count', async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from('app_config').select('value').eq('key', 'founding_passenger_count').single();
+    const count = parseInt(data?.value || '0');
+    res.json({ count, is_free: count < 500, spots_left: Math.max(0, 500 - count) });
+  } catch { res.json({ count: 0, is_free: true, spots_left: 500 }); }
+});
+
 // GET /api/driver/founding-count — get current founding member count
 router.get('/founding-count', async (req, res) => {
   const { data } = await supabase

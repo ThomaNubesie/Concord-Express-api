@@ -363,10 +363,34 @@ router.get('/identity-status', verifyAuth, async (req, res) => {
 router.post('/verification-fee', verifyAuth, async (req, res) => {
   try {
     const { payment_method_id, role, is_founding_member } = req.body;
-    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
 
     const VERIFY_FEE  = 399;  // C$3.99 in cents
     const DRIVER_FEE  = is_founding_member ? 1000 : 2000; // C$10 or C$20
+
+    // Check if passenger qualifies for free verification (first 500)
+    let passengerIsFree = false;
+    if (role === 'passenger') {
+      const { data: config } = await supabase
+        .from('app_config').select('value').eq('key', 'founding_passenger_count').single();
+      const count = parseInt(config?.value || '0');
+      if (count < 500) {
+        passengerIsFree = true;
+        // Increment counter
+        await supabase.from('app_config')
+          .upsert({ key: 'founding_passenger_count', value: String(count + 1) }, { onConflict: 'key' });
+      }
+    }
+
+    // If passenger is free, skip payment entirely
+    if (passengerIsFree) {
+      await supabase.from('users')
+        .update({ verification_fee_paid: true, is_founding_passenger: true })
+        .eq('id', req.userId);
+      return res.json({ success: true, waived: true, is_founding_passenger: true });
+    }
+
+    if (!payment_method_id) return res.status(400).json({ error: 'payment_method_id required' });
+
     const totalCents  = role === 'passenger'
       ? VERIFY_FEE
       : role === 'driver' || role === 'both'
