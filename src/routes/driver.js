@@ -220,6 +220,7 @@ router.get('/traffic-conditions', verifyAuth, async (req, res) => {
       quebec:       { lat: 46.8139,  lng: -71.2080 },
       chicoutimi:   { lat: 48.4279,  lng: -71.0683 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
+      gatineau:      { lat: 45.4765,  lng: -75.7013 },
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       // France
       paris:        { lat: 48.8566,  lng: 2.3522   },
@@ -234,6 +235,7 @@ router.get('/traffic-conditions', verifyAuth, async (req, res) => {
       // Ivory Coast
       abidjan:      { lat: 5.3600,   lng: -4.0083  },
       yamoussoukro: { lat: 6.8276,   lng: -5.2893  },
+      gatineau:      { lat: 45.4765,  lng: -75.7013 },
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
     };
@@ -451,10 +453,12 @@ router.get('/nearby-places', verifyAuth, async (req, res) => {
       cornwall:     { lat: 45.0182,  lng: -74.7266 },
       peterborough: { lat: 44.3091,  lng: -78.3197 },
       quebec:       { lat: 46.8139,  lng: -71.2080 },
+      gatineau:      { lat: 45.4765,  lng: -75.7013 },
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
       chicoutimi:   { lat: 48.4279,  lng: -71.0683 },
       fredericton:  { lat: 45.9636,  lng: -66.6431 },
+      gatineau:      { lat: 45.4765,  lng: -75.7013 },
       moncton:      { lat: 46.0878,  lng: -64.7782 },
       // France
       paris:        { lat: 48.8566,  lng: 2.3522   },
