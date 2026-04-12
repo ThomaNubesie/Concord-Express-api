@@ -4,7 +4,7 @@ const supabase   = require('../lib/supabase');
 const stripe     = require('../lib/stripe');
 const { verifyAuth } = require('../middleware/auth');
 const { formatTimeInZone, formatDateTimeInZone } = require('../lib/timezone');
-const { Notif }  = require('../lib/notifications');
+const { Notif, sendNotification } = require('../lib/notifications');
 
 // ── POST /api/bookings — Create booking ───────────────────────────────────────
 
@@ -382,9 +382,12 @@ router.delete('/:id', verifyAuth, async (req, res) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    if (!['confirmed', 'active'].includes(booking.status)) {
+    if (!['confirmed', 'active', 'pending'].includes(booking.status)) {
       return res.status(400).json({ error: 'Booking cannot be cancelled' });
     }
+
+    // Pending approval — full refund, no penalty, no cancellation count
+    const isPendingApproval = booking.status === 'pending' || booking.approval_status === 'pending';
 
     // Calculate refund based on tiered policy
     const minsUntil  = (new Date(booking.trip.departure_at) - Date.now()) / 60000;
@@ -392,7 +395,11 @@ router.delete('/:id', verifyAuth, async (req, res) => {
     let refundPct    = 0;
     let refundAmount = 0;
 
-    if (hoursUntil > 24) {
+    if (isPendingApproval) {
+      // Full refund, no penalty for pending approval cancellations
+      refundPct    = 100;
+      refundAmount = booking.total_amount;
+    } else if (hoursUntil > 24) {
       refundPct    = 100;
       refundAmount = booking.total_amount;
     } else if (hoursUntil >= 2) {
@@ -423,6 +430,16 @@ router.delete('/:id', verifyAuth, async (req, res) => {
         refund_pct:    refundPct,
       })
       .eq('id', req.params.id);
+
+    // Only decrement seats and increment cancellation count for confirmed bookings
+    if (!isPendingApproval) {
+      await supabase.from('trips')
+        .update({ seats_booked: supabase.rpc('decrement', { x: booking.seats }) })
+        .eq('id', booking.trip_id);
+      // Increment passenger cancellation count
+      const { data: pax } = await supabase.from('users').select('cancellations_as_passenger').eq('id', req.userId).single();
+      await supabase.from('users').update({ cancellations_as_passenger: (pax?.cancellations_as_passenger || 0) + 1 }).eq('id', req.userId);
+    }
 
     // Notify driver
     const { data: user } = await supabase
@@ -719,14 +736,32 @@ router.post('/:id/approve', verifyAuth, async (req, res) => {
       .update({ approval_status: 'approved', status: 'confirmed' })
       .eq('id', req.params.id);
 
-    // Notify passenger
-    await supabase.from('notifications').insert({
-      user_id: booking.passenger_id,
-      type: 'booking',
-      title: 'Booking Approved!',
-      body: 'Your booking request has been approved by the driver.',
-      action_url: `/passenger/home`,
+    // Get driver name and trip details for notification
+    const { data: tripDetails } = await supabase
+      .from('trips')
+      .select('from_city, to_city, departure_at, driver:users!trips_driver_id_fkey(full_name)')
+      .eq('id', booking.trip_id).single();
+
+    const driverName = tripDetails?.driver?.full_name || 'Your driver';
+    const depDate = tripDetails?.departure_at
+      ? new Date(tripDetails.departure_at).toLocaleDateString('en-CA', { weekday:'short', month:'short', day:'numeric' })
+      : '';
+
+    // Send push + in-app notification to passenger
+    await sendNotification({
+      userId:    booking.passenger_id,
+      category:  'booking',
+      icon:      '✅',
+      isUrgent:  true,
+      title:     '🎉 Booking Approved!',
+      body:      `${driverName} approved your trip from ${tripDetails?.from_city || ''} to ${tripDetails?.to_city || ''} on ${depDate}.`,
+      relatedId: booking.trip_id,
     });
+
+    // Also increment seats_booked now that it's confirmed
+    await supabase.from('trips')
+      .update({ seats_booked: supabase.raw('seats_booked + ' + booking.seats) })
+      .eq('id', booking.trip_id);
 
     res.json({ success: true });
   } catch (err) {
@@ -774,13 +809,15 @@ router.post('/:id/decline', verifyAuth, async (req, res) => {
       });
     }
 
-    // Notify passenger
-    await supabase.from('notifications').insert({
-      user_id: booking.passenger_id,
-      type: 'cancel',
-      title: 'Booking Declined',
-      body: reason ? `Your booking was declined: ${reason}` : 'Your booking request was declined by the driver.',
-      action_url: `/passenger/home`,
+    // Send push + in-app notification to passenger
+    await sendNotification({
+      userId:    booking.passenger_id,
+      category:  'cancel',
+      icon:      '❌',
+      isUrgent:  true,
+      title:     'Booking Declined',
+      body:      reason ? `Your booking was declined: ${reason}` : 'Your booking request was declined by the driver.',
+      relatedId: booking.trip_id,
     });
 
     // Process refund if payment was captured
