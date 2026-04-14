@@ -764,6 +764,33 @@ router.post('/:id/complete', verifyAuth, async (req, res) => {
         title: '🏁 Trip Completed',
         body: 'Your trip is complete. Payment has been processed. Thank you for riding with Concord!',
       });
+
+      // Increment passenger total_trips and check referral release
+      await supabase.rpc('increment_total_trips', { uid: booking.passenger_id }).catch(() => {});
+      
+      // Release referrer's pending credit if this passenger was referred
+      try {
+        const { data: pax } = await supabase.from('users')
+          .select('referred_by, total_trips').eq('id', booking.passenger_id).single();
+        if (pax?.referred_by && (pax.total_trips || 0) >= 1) {
+          const { data: pending } = await supabase.from('loyalty_credits')
+            .select('id, note').eq('user_id', pax.referred_by)
+            .eq('type', 'referral_pending')
+            .eq('referred_user_id', booking.passenger_id)
+            .is('used_at', null).single();
+          if (pending) {
+            await supabase.from('loyalty_credits').update({
+              type: 'referral',
+              note: pending.note.replace('Pending: ', 'Earned: '),
+            }).eq('id', pending.id);
+            await supabase.from('notifications').insert({
+              user_id: pax.referred_by, type: 'loyalty',
+              title: '🎉 Referral reward unlocked!',
+              body: 'Your referral completed their first trip! C$5 credit is now available.',
+            });
+          }
+        }
+      } catch (e) { console.log('[Referral] Release check error:', e.message); }
     }
 
     res.json({ success: true });
