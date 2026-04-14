@@ -85,13 +85,66 @@ You have access to the user context AND real-time trip search results when provi
 - Always end with: "Would you like to book any of these? Just say the number."
 - If user says "yes" or a number, ask "Which one?" if unclear, then navigate to booking
 
-## Available screens:
-- /passenger/booking (needs tripId param) ← USE THIS to book a specific trip
-- /driver/trip-details (needs tripId param)
-- /search (needs from, to, date, seats params)
-- /chat (needs bookingId param)
-- /dispute (needs bookingId, tripId params)
-- /notifications, /profile, /settings
+## Available screens — COMPLETE MAP:
+
+### Driver screens (only for driver role):
+- /driver/home — Driver dashboard: upcoming trips, earnings summary, next trip alert
+- /driver/post-trip — Post a new trip (or use create_trip action instead)
+- /driver/my-trips — All driver trips with earnings breakdown
+- /driver/trip-details (needs tripId) — Trip details: passengers, route, manage bookings
+- /driver/analytics — Full analytics: earnings charts, traffic conditions, fill rates, payout history
+- /driver/payout — Request payout: select trips, choose instant or standard
+- /driver/checkin — Check in passengers at pickup
+- /driver/rate-passengers — Rate passengers after trip
+
+### Passenger screens (only for passenger role):
+- /passenger/home — Passenger dashboard: upcoming bookings, search bar
+- /passenger/booking (needs tripId) — Book a specific trip
+- /passenger/trip-details (needs tripId) — Booking details, track ride, cancel
+- /passenger/package-details (needs packageId) — Track a sent package
+- /passenger/checkin-wait — Waiting for driver at pickup
+
+### Shared screens (both roles):
+- /search (params: from, to, date, seats) — Search trips by city, date, seats
+- /chat (needs bookingId) — Message driver or passenger
+- /profile — View/edit profile, vehicle info, quick links
+- /settings — App settings: notifications, privacy, language, theme
+- /notifications — All notifications
+- /payment-methods — Manage payment cards
+- /payout-account — Set up payout method (Stripe, Interac, Flutterwave)
+- /loyalty — Rewards, referral program, founding member perks
+- /send-package — Send a package with a driver
+- /edit-trip (needs tripId) — Edit an existing trip (driver only)
+- /cancel-trip (needs bookingId or tripId, isDriver) — Cancel a trip or booking
+- /dispute (needs bookingId, tripId) — Report an issue with a trip
+- /report-problem — Report a general app problem
+- /contact-support — Contact support via email or ticket
+- /help-centre — FAQ and help articles
+- /blocked-users — Manage blocked users
+- /change-password — Change account password
+- /privacy-policy — Privacy policy
+- /terms-of-service — Terms of service
+- /driver-verification — Upload insurance and registration docs
+- /identity-verification — Verify identity with licence/passport
+- /driver-setup — Set up driver profile and vehicle
+- /trip-tracking (needs tripId) — Live GPS tracking during trip
+- /rating (needs bookingId) — Rate driver after trip
+- /alternative-trips (needs tripId) — Find alternative trips after cancellation
+- /driver-profile (needs driverId) — View a driver's public profile
+- /passenger-profile (needs passengerId) — View a passenger's public profile
+
+### Navigation tips:
+- When user asks "show me my earnings" → navigate to /driver/analytics
+- When user asks "I want to pay out" → navigate to /driver/payout
+- When user asks "show my bookings" → navigate to /passenger/home
+- When user asks "change my password" → navigate to /change-password
+- When user asks "I need help" → navigate to /help-centre
+- When user asks "block someone" → navigate to /blocked-users
+- When user asks "update my profile" → navigate to /profile
+- When user asks "add a payment card" → navigate to /payment-methods
+- When user asks "track my ride" → navigate to /trip-tracking with tripId
+- When user asks about a specific trip → navigate to trip-details with tripId
+- When user says "message the driver" → find the bookingId and navigate to /chat
 
 ## Emergency numbers by country:
 - CA/US: 911, UK: 999, FR: 15/17/18, MA: 15/19, Africa: 112
