@@ -30,6 +30,15 @@ async function deleteOTP(key) {
   await supabase.from('otp_store').delete().eq('key', key);
 }
 
+// Track device and IP
+async function trackDevice(userId, req) {
+  const deviceId = req.headers['x-device-id'] || req.headers['x-request-id'] || null;
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const updates = { last_ip: ip };
+  if (deviceId) updates.device_id = deviceId;
+  await supabase.from('users').update(updates).eq('id', userId).catch(() => {});
+}
+
 function makeTokens(userId) {
   const accessToken  = jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '7d' });
   const refreshToken = jwt.sign({ sub: userId, type: 'refresh' }, JWT_SECRET, { expiresIn: '30d' });

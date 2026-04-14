@@ -74,6 +74,42 @@ router.post('/referral/apply', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: 'Referral codes can only be used within 7 days of account creation' });
     }
 
+    // Anti-fraud: must have a verified payment method on file
+    const stripe = require('../lib/stripe');
+    const { data: userFull } = await supabase.from('users')
+      .select('stripe_customer_id').eq('id', req.userId).single();
+    if (userFull?.stripe_customer_id) {
+      const methods = await stripe.paymentMethods.list({
+        customer: userFull.stripe_customer_id, type: 'card',
+      });
+      if (!methods.data || methods.data.length === 0) {
+        return res.status(400).json({ error: 'Please add a payment method before using a referral code' });
+      }
+    } else {
+      return res.status(400).json({ error: 'Please add a payment method before using a referral code' });
+    }
+
+    // Anti-fraud: check if referrer and new user share the same device
+    const { data: meDevice } = await supabase.from('users')
+      .select('device_id, last_ip').eq('id', req.userId).single();
+    const { data: referrerDevice } = await supabase.from('users')
+      .select('device_id, last_ip').eq('id', referrer.id).single();
+    
+    if (meDevice?.device_id && referrerDevice?.device_id && 
+        meDevice.device_id === referrerDevice.device_id) {
+      return res.status(400).json({ error: 'Referral not allowed from the same device' });
+    }
+
+    // Also check: how many accounts from this device have used referral codes?
+    if (meDevice?.device_id) {
+      const { data: sameDevice } = await supabase.from('users')
+        .select('id').eq('device_id', meDevice.device_id)
+        .not('referred_by', 'is', null);
+      if (sameDevice && sameDevice.length >= 2) {
+        return res.status(400).json({ error: 'Too many referrals from this device' });
+      }
+    }
+
     // Anti-fraud: check if referrer has reached max referral earnings
     const { data: referrerCredits } = await supabase.from('loyalty_credits')
       .select('amount').eq('user_id', referrer.id).eq('type', 'referral');
