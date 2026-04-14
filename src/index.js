@@ -51,7 +51,11 @@ app.use('/api/auth/verify-otp', authLimiter);
 app.use('/api/', limiter);
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
-app.get('/health', async (req, res) => {
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'Concord Xpress API', version: '1.0.0', timestamp: new Date().toISOString() });
+});
+
+app.get('/health/deep', async (req, res) => {
   const checks = { api: 'ok', database: 'unknown', timestamp: new Date().toISOString() };
   try {
     const { error } = await require('./lib/supabase').from('users').select('id').limit(1);

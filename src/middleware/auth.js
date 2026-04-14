@@ -1,8 +1,7 @@
 const jwt     = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
-  console.error('FATAL: JWT_SECRET environment variable is not set!');
-  if (process.env.NODE_ENV === 'production') process.exit(1);
+  console.error('WARNING: JWT_SECRET environment variable is not set! Auth will not work.');
 }
 
 const verifyAuth = (req, res, next) => {
