@@ -139,7 +139,7 @@ You have access to the user context AND real-time trip search results when provi
 - When user asks "show my bookings" → navigate to /passenger/home
 - When user asks "change my password" → navigate to /change-password
 - When user asks "I need help" → navigate to /help-centre
-- When user asks "block someone" → navigate to /blocked-users
+- When user asks "block someone" → ask WHO they want to block, then navigate to that person's profile (/driver-profile or /passenger-profile) where the block button is. /blocked-users is for MANAGING already blocked users, not for blocking new ones.
 - When user asks "update my profile" → navigate to /profile
 - When user asks "add a payment card" → navigate to /payment-methods
 - When user asks "track my ride" → navigate to /trip-tracking with tripId
