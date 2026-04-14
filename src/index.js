@@ -9,15 +9,43 @@ const app = express();
 
 app.set("trust proxy", 1);
 
-app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+app.use(helmet({
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+// Force HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect('https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.FRONTEND_URL || 'https://concordxpress.ca').split(',')
+    : '*',
+  credentials: true,
+}));
 app.use(morgan('combined'));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Sanitize all incoming request bodies
+const { sanitizeBody } = require('./lib/sanitize');
+app.use((req, res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    req.body = sanitizeBody(req.body);
+  }
+  next();
+});
 app.use('/api/bookings', rateLimit({ windowMs: 60000, max: 30, message: { error: 'Too many requests' } }));
-app.use('/api/auth',     rateLimit({ windowMs: 60000, max: 100, message: { error: 'Too many requests' } }));
+app.use('/api/auth',     rateLimit({ windowMs: 60000, max: 20, message: { error: 'Too many requests' } }));
 
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, message: { error: 'Too many requests' } });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: { error: 'Too many login attempts. Please wait 15 minutes.' } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { error: 'Too many login attempts. Please wait 15 minutes.' } });
 app.use('/api/auth/send-otp', authLimiter);
 app.use('/api/auth/verify-otp', authLimiter);
 app.use('/api/', limiter);
@@ -47,7 +75,14 @@ loadRoute('/api/assistant',     './routes/assistant');
 loadRoute('/api/loyalty',       './routes/loyalty');
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
-app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message || 'Internal server error' }));
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', new Date().toISOString(), req.method, req.path, err.message);
+  const status = err.status || 500;
+  const message = process.env.NODE_ENV === 'production' && status === 500
+    ? 'Internal server error'
+    : err.message || 'Internal server error';
+  res.status(status).json({ error: message });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {

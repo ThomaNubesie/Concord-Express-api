@@ -1,5 +1,9 @@
 const jwt     = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'concordxpress-super-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is not set!');
+  if (process.env.NODE_ENV === 'production') process.exit(1);
+}
 
 const verifyAuth = (req, res, next) => {
   try {

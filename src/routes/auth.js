@@ -11,7 +11,7 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'concordxpress-secret';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 async function generateOTP(key) {
   const otp     = Math.floor(100000 + Math.random() * 900000).toString();
