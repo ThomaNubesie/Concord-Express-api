@@ -51,8 +51,21 @@ app.use('/api/auth/verify-otp', authLimiter);
 app.use('/api/', limiter);
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'Concord Xpress API', version: '1.0.0', timestamp: new Date().toISOString() });
+app.get('/health', async (req, res) => {
+  const checks = { api: 'ok', database: 'unknown', timestamp: new Date().toISOString() };
+  try {
+    const { error } = await require('./lib/supabase').from('users').select('id').limit(1);
+    checks.database = error ? 'error: ' + error.message : 'ok';
+  } catch (e) { checks.database = 'error: ' + e.message; }
+  const allOk = checks.database === 'ok';
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? 'ok' : 'degraded',
+    service: 'Concord Xpress API',
+    version: '1.0.0',
+    ...checks,
+    uptime: Math.floor(process.uptime()) + 's',
+    memory: Math.round(process.memoryUsage().rss / 1024 / 1024) + 'MB',
+  });
 });
 
 const loadRoute = (path, file) => {
@@ -93,3 +106,28 @@ app.listen(PORT, "0.0.0.0", () => {
 
 module.exports = app;
 // redeploy Tue Mar 31 11:37:29 EDT 2026
+
+
+// Graceful shutdown
+const shutdown = (signal) => {
+  console.log('[Server] ' + signal + ' received. Shutting down gracefully...');
+  server.close(() => {
+    console.log('[Server] HTTP server closed');
+    process.exit(0);
+  });
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    console.error('[Server] Forced shutdown after 10s timeout');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err);
+  shutdown('uncaughtException');
+});
