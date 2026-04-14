@@ -4,6 +4,8 @@ const Anthropic = require('@anthropic-ai/sdk');
 const supabase  = require('../lib/supabase');
 const { verifyAuth } = require('../middleware/auth');
 
+const LANG_FULL = { en:'English', fr:'French', ar:'Arabic', es:'Spanish', sw:'Swahili', ha:'Hausa', wo:'Wolof', yo:'Yoruba' };
+
 // Search trips for assistant
 async function searchTripsForAssistant(from, to, date, timeOfDay) {
   try {
@@ -251,10 +253,12 @@ User query: ${query}`,
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 400,
-      system:     SYSTEM_PROMPT + '\n\nIMPORTANT: This user is a ' + (role || 'passenger').toUpperCase() + '. ' +
+      system:     SYSTEM_PROMPT + 
+        '\n\nIMPORTANT: This user is a ' + (role || 'passenger').toUpperCase() + '. ' +
         (role === 'driver'
           ? 'Focus on driver features: posting trips, managing bookings, earnings, payouts, passenger approvals, trip tracking. You can help them post trips by collecting details. When they ask about trips, show THEIR posted trips not search results.'
-          : 'Focus on passenger features: finding trips, booking, tracking, packages, payments. When they ask about trips, search for available trips to book.'),
+          : 'Focus on passenger features: finding trips, booking, tracking, packages, payments. When they ask about trips, search for available trips to book.') +
+        '\n\nLANGUAGE: You MUST respond in ' + (LANG_FULL[language] || 'English') + '. Every word of your speech response must be in ' + (LANG_FULL[language] || 'English') + '. This includes greetings, trip details, questions, confirmations — everything. The only exceptions are proper nouns (city names, app name ConcordXpress, brand names).',
       messages:   msgs,
     });
 
