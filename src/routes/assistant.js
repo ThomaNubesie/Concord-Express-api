@@ -198,7 +198,10 @@ User query: ${query}`,
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 400,
-      system:     SYSTEM_PROMPT,
+      system:     SYSTEM_PROMPT + '\n\nIMPORTANT: This user is a ' + (role || 'passenger').toUpperCase() + '. ' +
+        (role === 'driver'
+          ? 'Focus on driver features: posting trips, managing bookings, earnings, payouts, passenger approvals, trip tracking. You can help them post trips by collecting details. When they ask about trips, show THEIR posted trips not search results.'
+          : 'Focus on passenger features: finding trips, booking, tracking, packages, payments. When they ask about trips, search for available trips to book.'),
       messages:   msgs,
     });
 
