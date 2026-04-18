@@ -27,11 +27,11 @@ const requireAdmin = async (req, res, next) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('role')
+      .select('is_admin')
       .eq('id', req.userId)
       .single();
 
-    if (error || !user || user.role !== 'admin') {
+    if (error || !user || !user.is_admin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
     next();
