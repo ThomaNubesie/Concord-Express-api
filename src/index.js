@@ -89,7 +89,8 @@ loadRoute('/api/notifications', './routes/notifications');
 loadRoute('/api/driver',        './routes/driver');
 loadRoute('/api/packages',      './routes/packages');
 loadRoute('/api/assistant',     './routes/assistant');
-loadRoute('/api/loyalty',       './routes/loyalty');
+loadRoute('/api/loyalty',         './routes/loyalty');
+loadRoute('/api/tax-documents',  './routes/tax-documents');
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, req, res, next) => {
