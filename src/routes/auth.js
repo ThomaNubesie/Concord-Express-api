@@ -300,8 +300,17 @@ router.post('/admin-login', async (req, res) => {
     if (!user.admin_password_hash) {
       return res.status(401).json({ error: 'Password not set. Contact system administrator.' });
     }
-    const valid = await bcrypt.compare(password, user.admin_password_hash);
+    // Handle both pgcrypto ($2a$) and bcryptjs ($2b$) hash formats
+    let hash = user.admin_password_hash;
+    if (hash.startsWith('$2a$')) hash = hash.replace('$2a$', '$2b$');
+    const valid = await bcrypt.compare(password, hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Re-hash with bcryptjs for future logins if needed
+    if (user.admin_password_hash.startsWith('$2a$')) {
+      const newHash = await bcrypt.hash(password, 12);
+      await supabase.from('users').update({ admin_password_hash: newHash }).eq('id', user.id);
+    }
 
     // Send OTP for 2FA
     const otp = await generateOTP('admin-' + user.id);
@@ -325,23 +334,19 @@ router.post('/admin-login', async (req, res) => {
 // POST /api/auth/admin-verify — Verify OTP for admin 2FA
 router.post('/admin-verify', async (req, res) => {
   try {
-    const { email, password, otp } = req.body;
-    if (!email || !password || !otp) return res.status(400).json({ error: 'All fields required' });
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: 'Email and code required' });
 
     const { data: user } = await supabase
       .from('users')
-      .select('id, full_name, email, phone, role, is_admin, admin_password_hash, avatar_url')
+      .select('id, full_name, email, phone, role, is_admin, avatar_url')
       .eq('email', email.trim().toLowerCase())
       .eq('is_admin', true)
       .single();
 
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const bcrypt = require('bcryptjs');
-    const valid = await bcrypt.compare(password, user.admin_password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-
-    // Verify OTP
+    // Verify OTP (password was already verified in admin-login step)
     const stored = await getOTP('admin-' + user.id);
     if (!stored || stored.otp !== otp) return res.status(401).json({ error: 'Invalid verification code' });
     if (new Date(stored.expires) < new Date()) return res.status(401).json({ error: 'Code expired' });
