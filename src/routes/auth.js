@@ -279,6 +279,118 @@ router.post('/change-password', verifyAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// POST /api/auth/admin-login — Email + password login for admins
+router.post('/admin-login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    // Find admin user
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, full_name, email, phone, role, is_admin, admin_password_hash')
+      .eq('email', email.trim().toLowerCase())
+      .eq('is_admin', true)
+      .single();
+
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Check password
+    const bcrypt = require('bcryptjs');
+    if (!user.admin_password_hash) {
+      return res.status(401).json({ error: 'Password not set. Contact system administrator.' });
+    }
+    const valid = await bcrypt.compare(password, user.admin_password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Send OTP for 2FA
+    const otp = await generateOTP('admin-' + user.id);
+    if (twilioClient && user.phone) {
+      try {
+        await twilioClient.messages.create({
+          body: `ConcordXpress Admin: Your verification code is ${otp}`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: user.phone,
+        });
+      } catch (e) { console.error('[Admin OTP SMS]', e.message); }
+    }
+
+    res.json({ requires_otp: true, message: 'Verification code sent' });
+  } catch (err) {
+    console.error('[Admin Login]', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/admin-verify — Verify OTP for admin 2FA
+router.post('/admin-verify', async (req, res) => {
+  try {
+    const { email, password, otp } = req.body;
+    if (!email || !password || !otp) return res.status(400).json({ error: 'All fields required' });
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, full_name, email, phone, role, is_admin, admin_password_hash, avatar_url')
+      .eq('email', email.trim().toLowerCase())
+      .eq('is_admin', true)
+      .single();
+
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const bcrypt = require('bcryptjs');
+    const valid = await bcrypt.compare(password, user.admin_password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Verify OTP
+    const stored = await getOTP('admin-' + user.id);
+    if (!stored || stored.otp !== otp) return res.status(401).json({ error: 'Invalid verification code' });
+    if (new Date(stored.expires) < new Date()) return res.status(401).json({ error: 'Code expired' });
+    await deleteOTP('admin-' + user.id);
+
+    // Generate tokens
+    const access_token = jwt.sign({ userId: user.id, role: 'admin' }, JWT_SECRET, { expiresIn: '4h' });
+    const refresh_token = jwt.sign({ userId: user.id, type: 'refresh' }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      access_token,
+      refresh_token,
+      user: {
+        id: user.id,
+        full_name: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        is_admin: true,
+        avatar_url: user.avatar_url,
+      },
+    });
+  } catch (err) {
+    console.error('[Admin Verify]', err);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+// POST /api/auth/set-admin-password — Set password for admin account (one-time setup)
+router.post('/set-admin-password', verifyAuth, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    // Verify caller is admin
+    const { data: user } = await supabase.from('users').select('is_admin').eq('id', req.userId).single();
+    if (!user?.is_admin) return res.status(403).json({ error: 'Not authorized' });
+
+    const bcrypt = require('bcryptjs');
+    const hash = await bcrypt.hash(password, 12);
+    await supabase.from('users').update({ admin_password_hash: hash }).eq('id', req.userId);
+
+    res.json({ success: true, message: 'Admin password set' });
+  } catch (err) {
+    console.error('[Set Admin Password]', err);
+    res.status(500).json({ error: 'Failed to set password' });
+  }
+});
+
 module.exports = router;
 
 // POST /api/auth/extract-intent — Voice search intent extraction
