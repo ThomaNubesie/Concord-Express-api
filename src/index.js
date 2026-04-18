@@ -91,6 +91,7 @@ loadRoute('/api/packages',      './routes/packages');
 loadRoute('/api/assistant',     './routes/assistant');
 loadRoute('/api/loyalty',         './routes/loyalty');
 loadRoute('/api/tax-documents',  './routes/tax-documents');
+loadRoute('/api',                './routes/agents');
 
 app.use((req, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, req, res, next) => {
