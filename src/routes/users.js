@@ -188,4 +188,16 @@ router.get('/driver-profile-status', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/users/push-token — save Expo push notification token
+router.post('/push-token', verifyAuth, async (req, res) => {
+  const { push_token, platform } = req.body;
+  if (!push_token) return res.status(400).json({ error: 'push_token required' });
+  const { error } = await supabase
+    .from('users')
+    .update({ push_token, push_platform: platform || 'ios' })
+    .eq('id', req.userId);
+  if (error) return res.status(500).json({ error: 'Failed to save push token' });
+  res.json({ ok: true });
+});
+
 module.exports = router;

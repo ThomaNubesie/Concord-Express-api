@@ -52,25 +52,29 @@ async function sendNotification({
       return null;
     }
 
-    // 2. Get user's FCM token
+    // 2. Get user's push tokens
     const { data: user } = await supabase
       .from('users')
-      .select('fcm_token')
+      .select('fcm_token, push_token')
       .eq('id', userId)
       .single();
 
+    const pushData = {
+      notificationId: notif.id,
+      category,
+      actionUrl:      actionUrl ?? '',
+      relatedId:      relatedId ?? '',
+      screen:         actionUrl || '/notifications',
+    };
+
+    // Send via FCM (Android/legacy)
     if (user?.fcm_token) {
-      await sendFCMPush({
-        token:   user.fcm_token,
-        title,
-        body,
-        data: {
-          notificationId: notif.id,
-          category,
-          actionUrl:      actionUrl ?? '',
-          relatedId:      relatedId ?? '',
-        },
-      });
+      await sendFCMPush({ token: user.fcm_token, title, body, data: pushData });
+    }
+
+    // Send via Expo Push (iOS + Android)
+    if (user?.push_token) {
+      await sendExpoPush({ token: user.push_token, title, body, data: pushData });
     }
 
     return notif;
@@ -112,6 +116,24 @@ async function sendFCMPush({ token, title, body, data = {} }) {
   } catch (err) {
     // FCM errors are non-fatal — notification is already in DB
     console.error('[FCM] Push failed (non-fatal):', err.message);
+  }
+}
+
+// ── Expo Push (for expo-notifications) ──────────────────────────────────────
+
+async function sendExpoPush({ token, title, body, data = {} }) {
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: token, title, body, data, sound: 'default' }),
+    });
+    const result = await res.json();
+    if (result.data?.status === 'error') {
+      console.error('[Expo Push] Failed:', result.data.message);
+    }
+  } catch (err) {
+    console.error('[Expo Push] Error (non-fatal):', err.message);
   }
 }
 
