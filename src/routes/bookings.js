@@ -63,7 +63,7 @@ router.post('/', verifyAuth, async (req, res) => {
 
     // Calculate amounts
     const fareAmount  = trip.price_per_seat * seats;
-    const bookingFee  = trip.cash_only ? 5.00 : parseFloat(process.env.BOOKING_FEE ?? '3.00') * seats;
+    const bookingFee  = 2.99 * seats;
 
     // For cash trips, block if no payment method (needed for booking fee)
     if (!trip.cash_only && !payment_method_id) {
@@ -104,7 +104,7 @@ router.post('/', verifyAuth, async (req, res) => {
     // Create PaymentIntent — cash trips only charge booking fee, card trips charge full amount
     let paymentIntent;
     if (trip.cash_only) {
-      // Cash trip: only charge C$5 booking fee, no escrow needed
+      // Cash trip: charge C$2.99/seat booking fee, no escrow needed
       paymentIntent = await stripe.paymentIntents.create({
         amount:         Math.round(bookingFee * 100),
         currency:       'cad',
@@ -556,7 +556,7 @@ router.post('/init-flutterwave', verifyAuth, async (req, res) => {
       .from('users').select('full_name, email, country, language').eq('id', req.userId).single();
 
     const fareAmount  = trip.price_per_seat * seats;
-    const bookingFee  = trip.cash_only ? 5.00 : parseFloat(process.env.BOOKING_FEE ?? '3.00') * seats;
+    const bookingFee  = 2.99 * seats;
     const creditUsed  = Math.min(credit_to_apply, fareAmount + bookingFee);
     const totalAmount = Math.max(0, fareAmount + bookingFee - creditUsed);
 
