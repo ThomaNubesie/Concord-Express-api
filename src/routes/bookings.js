@@ -759,9 +759,12 @@ router.post('/:id/approve', verifyAuth, async (req, res) => {
     });
 
     // Also increment seats_booked now that it's confirmed
-    await supabase.from('trips')
-      .update({ seats_booked: supabase.raw('seats_booked + ' + booking.seats) })
-      .eq('id', booking.trip_id);
+    const { data: currentTrip } = await supabase.from('trips').select('seats_booked').eq('id', booking.trip_id).single();
+    if (currentTrip) {
+      await supabase.from('trips')
+        .update({ seats_booked: (currentTrip.seats_booked || 0) + (booking.seats || 1) })
+        .eq('id', booking.trip_id);
+    }
 
     res.json({ success: true });
   } catch (err) {

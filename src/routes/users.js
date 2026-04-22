@@ -41,10 +41,34 @@ router.patch('/me/driver-profile', verifyAuth, async (req, res) => {
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('users')
-    .select('id, full_name, avatar_url, rating_as_driver, rating_as_passenger, total_trips, total_trips_driver, is_verified, created_at')
+    .select(`
+      id, full_name, avatar_url, email, phone,
+      rating_as_driver, rating_as_passenger,
+      total_trips, total_trips_driver,
+      is_verified, is_founding_member, country, language,
+      created_at, total_co2_saved_kg,
+      driver_profile (
+        id, vehicle_make, vehicle_model, vehicle_year,
+        vehicle_color, vehicle_plate, vehicle_seats,
+        vehicle_image_url, identity_verified, bio
+      )
+    `)
     .eq('id', req.params.id).single();
   if (error) return res.status(404).json({ error: 'User not found' });
-  res.json({ user: data });
+
+  // Fetch ratings
+  let ratings = [];
+  try {
+    const { data: ratingsData } = await supabase
+      .from('ratings')
+      .select('id, score, comment, created_at, rater:rater_id (full_name, avatar_url)')
+      .eq('ratee_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    ratings = ratingsData || [];
+  } catch (e) { /* ratings table may not exist */ }
+
+  res.json({ user: data, ratings });
 });
 
 router.delete('/me', verifyAuth, async (req, res) => {

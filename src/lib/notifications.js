@@ -363,6 +363,84 @@ const Notif = {
       relatedId: bookingId,
     }),
 
+  // ── Departure reminders (passenger) ──────────────────────────────────
+  departureReminder24h: (passengerId, driverName, route, time) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '📅',
+      title:     `Trip Tomorrow`,
+      body:      `Reminder: your ${route} trip with ${driverName} departs tomorrow at ${time}. Get ready!`,
+      actionUrl: '/passenger/home',
+    }),
+
+  departureReminder1h: (passengerId, driverName, route, stop) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '⏰',
+      isUrgent:  true,
+      title:     `Departing in 1 Hour`,
+      body:      `Your ${route} trip with ${driverName} leaves in 1 hour. Head to ${stop} now!`,
+      actionUrl: '/passenger/home',
+    }),
+
+  departureReminder30m: (passengerId, driverName, stop) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '🚨',
+      isUrgent:  true,
+      title:     `30 Minutes to Departure`,
+      body:      `Your ride with ${driverName} leaves in 30 minutes. Be at ${stop} — don't miss it!`,
+      actionUrl: '/passenger/home',
+    }),
+
+  // ── Departure reminders (driver) ───────────────────────────────────
+  driverReminder24h: (driverId, route, time, seatsBooked) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '📅',
+      title:     `Trip Tomorrow`,
+      body:      `Reminder: your ${route} trip departs tomorrow at ${time}. ${seatsBooked} seat${seatsBooked !== 1 ? 's' : ''} booked.`,
+      actionUrl: '/driver/home',
+    }),
+
+  driverReminder1h: (driverId, route, seatsBooked) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '⏰',
+      isUrgent:  true,
+      title:     `Departing in 1 Hour`,
+      body:      `Your ${route} trip leaves in 1 hour. ${seatsBooked} passenger${seatsBooked !== 1 ? 's' : ''} waiting. Time to get ready!`,
+      actionUrl: '/driver/home',
+    }),
+
+  driverReminder30m: (driverId, route) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '🚨',
+      isUrgent:  true,
+      title:     `30 Minutes to Departure`,
+      body:      `Your ${route} trip leaves in 30 minutes. Head to the pickup point!`,
+      actionUrl: '/driver/home',
+    }),
+
+  driverReminder15m: (driverId, route) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '🟢',
+      isUrgent:  true,
+      title:     `Start Your Trip`,
+      body:      `Your ${route} trip departs in 15 minutes. Tap to start the trip and begin check-in.`,
+      actionUrl: '/driver/home',
+    }),
+
+  // Legacy alias
   departureReminder: (passengerId, driverName, stop, time) =>
     sendNotification({
       userId:    passengerId,

@@ -108,6 +108,10 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log('🍁 Concord Xpress API running on port ' + PORT);
   console.log('   Environment: ' + process.env.NODE_ENV);
   console.log('   Supabase:    ' + process.env.SUPABASE_URL);
+
+  // Start trip departure reminder scheduler
+  const { startTripReminders } = require('./lib/tripReminders');
+  startTripReminders();
 });
 
 module.exports = app;
