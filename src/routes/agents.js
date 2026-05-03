@@ -504,4 +504,108 @@ router.patch('/admin/approvals/:bookingId', verifyAuth, requireAdmin, async (req
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/users  –  List all users (paginated)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/users', verifyAuth, requireAdmin, async (req, res) => {
+  try {
+    const { search, limit = 200 } = req.query;
+    let query = supabase
+      .from('users')
+      .select(`
+        id, full_name, email, role, country, language, created_at,
+        account_suspended, is_admin,
+        total_trips_driver, total_trips_passenger,
+        rating_as_driver, rating_as_passenger
+      `)
+      .order('created_at', { ascending: false })
+      .limit(Number(limit));
+    if (search) {
+      query = query.or(`full_name.ilike.%${search}%,email.ilike.%${search}%`);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ users: data || [] });
+  } catch (err) {
+    console.error('[Admin] GET /admin/users error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/cancellations  –  Cancelled bookings (recent first)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/cancellations', verifyAuth, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id, status, cancel_reason, cancel_by, cancelled_at, refund_amount, refund_pct,
+        passenger:users!bookings_passenger_id_fkey(id, full_name, cancellations_as_passenger),
+        trip:trips(id, from_city, to_city, departure_at)
+      `)
+      .eq('status', 'cancelled')
+      .order('cancelled_at', { ascending: false })
+      .limit(Number(limit));
+    if (error) throw error;
+    res.json({ cancellations: data || [] });
+  } catch (err) {
+    console.error('[Admin] GET /admin/cancellations error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch cancellations' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/payments  –  Recent payments (from bookings with stripe intents)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/payments', verifyAuth, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id, stripe_payment_intent_id, total_amount, fare_amount, status,
+        refund_amount, refund_pct, created_at, cancelled_at,
+        passenger:users!bookings_passenger_id_fkey(id, full_name, email),
+        trip:trips(id, from_city, to_city, departure_at, driver_id,
+          driver:users!trips_driver_id_fkey(full_name)
+        )
+      `)
+      .not('stripe_payment_intent_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(Number(limit));
+    if (error) throw error;
+    res.json({ payments: data || [] });
+  } catch (err) {
+    console.error('[Admin] GET /admin/payments error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch payments' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /admin/packages  –  All packages
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/packages', verifyAuth, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query;
+    const { data, error } = await supabase
+      .from('packages')
+      .select(`
+        id, package_type, size, sender_name, sender_phone, recipient_name, recipient_phone,
+        pickup_area, delivery_area, status, price, is_fragile, notes, created_at,
+        trip:trips(id, from_city, to_city, departure_at, driver_id,
+          driver:users!trips_driver_id_fkey(full_name)
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(Number(limit));
+    if (error) throw error;
+    res.json({ packages: data || [] });
+  } catch (err) {
+    console.error('[Admin] GET /admin/packages error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch packages' });
+  }
+});
+
 module.exports = router;
