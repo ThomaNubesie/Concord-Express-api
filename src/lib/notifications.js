@@ -440,6 +440,62 @@ const Notif = {
       actionUrl: '/driver/home',
     }),
 
+  // ── Late-trip escalations (driver hasn't started) ────────────────────────
+  driverNotStartedWarning: (driverId, route) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '⚠️',
+      isUrgent:  true,
+      title:     `Trip leaves in 5 minutes`,
+      body:      `You haven't started your ${route} trip yet. Tap "Running late" in trip details to add time, or start the trip now.`,
+      actionUrl: '/driver/home',
+    }),
+
+  driverGracePeriod: (driverId, route) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '⏰',
+      isUrgent:  true,
+      title:     `Departure time reached`,
+      body:      `Your ${route} trip should have started. You have 5 minutes to start the trip or mark "Running late" — otherwise this counts as a strike.`,
+      actionUrl: '/driver/home',
+    }),
+
+  passengerGracePeriod: (passengerId, driverName, route) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '⌛',
+      isUrgent:  true,
+      title:     `${driverName} is late`,
+      body:      `Your ${route} driver hasn't started the trip. We're giving them 5 more minutes. If they don't respond, you'll see alternative trips and can cancel for a full refund.`,
+      actionUrl: '/passenger/home',
+    }),
+
+  driverStrike: (driverId, route) =>
+    sendNotification({
+      userId:    driverId,
+      category:  'trips',
+      icon:      '🚫',
+      isUrgent:  true,
+      title:     `Strike issued — trip not started`,
+      body:      `Your ${route} trip was not started within the grace period. A strike has been recorded on your account.`,
+      actionUrl: '/driver/home',
+    }),
+
+  passengerTripDelayed: (passengerId, driverName, route) =>
+    sendNotification({
+      userId:    passengerId,
+      category:  'trips',
+      icon:      '🔁',
+      isUrgent:  true,
+      title:     `Trip not started — alternatives available`,
+      body:      `${driverName} did not start your ${route} trip. We've matched you with alternative trips, or you can cancel for a full refund.`,
+      actionUrl: '/passenger/home',
+    }),
+
   // Legacy alias
   departureReminder: (passengerId, driverName, stop, time) =>
     sendNotification({
