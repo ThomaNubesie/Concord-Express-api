@@ -680,6 +680,48 @@ router.post('/verify-flutterwave', verifyAuth, async (req, res) => {
   }
 });
 
+// POST /api/bookings/:id/no-show-refund — passenger claims full refund when
+// the driver no-showed (trip was auto-cancelled with reason driver_no_show).
+router.post('/:id/no-show-refund', verifyAuth, async (req, res) => {
+  try {
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('*, trip:trips(status, cancellation_reason)')
+      .eq('id', req.params.id)
+      .single();
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.passenger_id !== req.userId) return res.status(403).json({ error: 'Not your booking' });
+    if (booking.status === 'cancelled') return res.status(400).json({ error: 'Already cancelled' });
+    if (booking.trip?.cancellation_reason !== 'driver_no_show') {
+      return res.status(400).json({ error: 'Trip was not no-show cancelled' });
+    }
+
+    const refundAmount = parseFloat(booking.total_amount || booking.fare_amount || 0);
+    if (refundAmount > 0 && booking.stripe_payment_intent_id) {
+      try {
+        await stripe.refunds.create({
+          payment_intent: booking.stripe_payment_intent_id,
+          amount:         Math.round(refundAmount * 100),
+        });
+      } catch (e) { console.error('[no-show-refund stripe]', e.message); }
+    }
+
+    await supabase.from('bookings').update({
+      status:        'cancelled',
+      cancelled_at:  new Date().toISOString(),
+      cancel_by:     'system',
+      cancel_reason: 'driver_no_show',
+      refund_amount: refundAmount,
+      refund_pct:    100,
+    }).eq('id', req.params.id);
+
+    res.json({ success: true, refund_amount: refundAmount });
+  } catch (err) {
+    console.error('[no-show-refund]', err);
+    res.status(500).json({ error: 'Failed to process refund' });
+  }
+});
+
 module.exports = router;
 
 // ── GET /api/bookings — Get current user's bookings ───────────────────────────

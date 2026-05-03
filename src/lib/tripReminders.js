@@ -82,7 +82,19 @@ async function sendTripReminders() {
               if (w === '15m')          await Notif.driverReminder15m(trip.driver.id, route);
               if (w === 'late_warning') await Notif.driverNotStartedWarning(trip.driver.id, route);
               if (w === 'grace_period') await Notif.driverGracePeriod(trip.driver.id, route);
-              if (w === 'strike')       await Notif.driverStrike(trip.driver.id, route);
+              if (w === 'strike') {
+                await Notif.driverStrike(trip.driver.id, route);
+                // Record strike on driver's row + auto-cancel the trip so /start
+                // returns "Trip cannot be started" if driver tries later
+                const { data: d } = await supabase.from('users')
+                  .select('strikes_as_driver').eq('id', trip.driver.id).single();
+                await supabase.from('users')
+                  .update({ strikes_as_driver: (d?.strikes_as_driver || 0) + 1 })
+                  .eq('id', trip.driver.id);
+                await supabase.from('trips')
+                  .update({ status: 'cancelled', cancellation_reason: 'driver_no_show' })
+                  .eq('id', trip.id);
+              }
               sent.add(key);
               count++;
             } catch (e) { console.error('[reminders] Driver notify error:', e.message); }
@@ -106,7 +118,7 @@ async function sendTripReminders() {
               if (w === '1h')           await Notif.departureReminder1h(passId, driverName, route, firstStop);
               if (w === '30m')          await Notif.departureReminder30m(passId, driverName, firstStop);
               if (w === 'grace_period') await Notif.passengerGracePeriod(passId, driverName, route);
-              if (w === 'strike')       await Notif.passengerTripDelayed(passId, driverName, route);
+              if (w === 'strike')       await Notif.passengerTripDelayed(passId, driverName, route, booking.id);
               sent.add(key);
               count++;
             } catch (e) { console.error('[reminders] Passenger notify error:', e.message); }

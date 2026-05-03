@@ -485,7 +485,7 @@ const Notif = {
       actionUrl: '/driver/home',
     }),
 
-  passengerTripDelayed: (passengerId, driverName, route) =>
+  passengerTripDelayed: (passengerId, driverName, route, bookingId) =>
     sendNotification({
       userId:    passengerId,
       category:  'trips',
@@ -493,7 +493,8 @@ const Notif = {
       isUrgent:  true,
       title:     `Trip not started — alternatives available`,
       body:      `${driverName} did not start your ${route} trip. We've matched you with alternative trips, or you can cancel for a full refund.`,
-      actionUrl: '/passenger/home',
+      actionUrl: bookingId ? `/passenger/alternatives?bookingId=${bookingId}` : '/passenger/home',
+      relatedId: bookingId,
     }),
 
   // Legacy alias

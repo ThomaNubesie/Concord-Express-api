@@ -672,16 +672,70 @@ router.patch('/:id/stops/:stopId/complete', verifyAuth, async (req, res) => {
 router.post('/:id/start', verifyAuth, async (req, res) => {
   try {
     const { data: trip, error } = await supabase
-      .from('trips').select('driver_id, status').eq('id', req.params.id).single();
+      .from('trips').select('driver_id, status, departure_at').eq('id', req.params.id).single();
     if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
     if (trip.driver_id !== req.userId) return res.status(403).json({ error: 'Not your trip' });
     if (trip.status !== 'upcoming') return res.status(400).json({ error: 'Trip cannot be started' });
+
+    // Hard cutoff: trip can no longer be started 5 min past departure (after grace).
+    // Past this point the scheduler will mark the trip cancelled with a strike.
+    const minsLate = (Date.now() - new Date(trip.departure_at).getTime()) / 60000;
+    if (minsLate > 5) {
+      return res.status(400).json({ error: 'Trip can no longer be started — grace period has passed.' });
+    }
+
     await supabase.from('trips').update({ status: 'active' }).eq('id', req.params.id);
     await supabase.from('bookings').update({ status: 'active' })
       .eq('trip_id', req.params.id).in('status', ['confirmed']);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to start trip' });
+  }
+});
+
+// GET /api/trips/:id/alternatives — find trips matching a stranded passenger's
+// route and time window. Used after the original trip is no-show cancelled.
+router.get('/:id/alternatives', verifyAuth, async (req, res) => {
+  try {
+    const { data: orig } = await supabase
+      .from('trips')
+      .select('from_city, to_city, departure_at, driver_id')
+      .eq('id', req.params.id)
+      .single();
+    if (!orig) return res.status(404).json({ error: 'Trip not found' });
+
+    // ±6h window around the original departure (configurable)
+    const dep = new Date(orig.departure_at);
+    const start = new Date(dep.getTime() - 6 * 60 * 60000);
+    const end   = new Date(dep.getTime() + 6 * 60 * 60000);
+    const now   = new Date();
+
+    const { data: alternatives } = await supabase
+      .from('trips')
+      .select(`
+        id, from_city, to_city, departure_at, price_per_seat, seats_total, seats_booked,
+        driver:users!trips_driver_id_fkey(id, full_name, avatar_url, rating_as_driver),
+        pickup_stops(area)
+      `)
+      .eq('from_city', orig.from_city)
+      .eq('to_city', orig.to_city)
+      .eq('status', 'upcoming')
+      .neq('id', req.params.id)
+      .neq('driver_id', orig.driver_id)
+      .gte('departure_at', new Date(Math.max(start.getTime(), now.getTime())).toISOString())
+      .lte('departure_at', end.toISOString())
+      .order('departure_at', { ascending: true })
+      .limit(10);
+
+    // Only those with seats remaining
+    const available = (alternatives || []).filter(t =>
+      (t.seats_total || 0) - (t.seats_booked || 0) > 0
+    );
+
+    res.json({ alternatives: available });
+  } catch (err) {
+    console.error('[alternatives]', err);
+    res.status(500).json({ error: 'Failed to fetch alternatives' });
   }
 });
 
