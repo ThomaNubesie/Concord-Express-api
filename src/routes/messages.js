@@ -19,14 +19,13 @@ async function translateMessage(text, toLang) {
     const client = new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY });
     const msg = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      max_tokens: 1024,
       messages:   [{ role:'user', content:
-        `Detect the language of this message and translate it to ${targetLangName}. If the message is already in ${targetLangName}, return it unchanged. Reply with ONLY the translated text, no explanation, no quotes:\n\n${text}`
+        `Translate the following message into ${targetLangName}. Translate the entire message, even if parts of it are already in ${targetLangName} or in another language. Preserve names, emojis, and punctuation. Output ONLY the translated text — no preface, no explanation, no quotes.\n\nMessage:\n${text}`
       }],
     });
     const result = msg.content?.[0]?.text?.trim() || null;
-    // If result is identical to input, no translation needed
-    if (result === text.trim()) return null;
+    if (!result || result === text.trim()) return null;
     return result;
   } catch (e) {
     console.error('[translate]', e.message);
@@ -138,7 +137,7 @@ router.post('/:bookingId', verifyAuth, async (req, res) => {
         category:  'messages',
         icon:      '💬',
         title:     `${sender?.full_name || 'Someone'} sent you a message`,
-        body:      (translatedContent || content.trim()).slice(0, 80),
+        body:      (translatedContent || content.trim()).slice(0, 240),
         relatedId: bookingId,
         actionUrl: `/chat?bookingId=${bookingId}`,
       });
