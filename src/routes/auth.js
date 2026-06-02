@@ -11,13 +11,40 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
+const { Resend } = require('resend');
+const resendClient = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_EMAIL   = process.env.FROM_EMAIL || 'no-reply@concordxpress.ca';
+
+// In production we never leak codes in API responses and never honour the dev
+// master bypass. Locally (NODE_ENV !== 'production') both stay enabled so the
+// team can test without a live SMS/email provider.
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Send a verification code by email via Resend. Throws if not configured or the
+// send fails, so callers can decide how to respond.
+async function sendOtpEmail(to, otp) {
+  if (!resendClient) throw new Error('Email provider not configured (RESEND_API_KEY missing)');
+  await resendClient.emails.send({
+    from:    FROM_EMAIL,
+    to,
+    subject: 'Your Concord Xpress verification code',
+    text:    `Your Concord Xpress verification code is ${otp}. It is valid for 10 minutes.`,
+    html:    `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:420px;margin:0 auto;padding:24px">
+      <h2 style="color:#0a0a0a;margin:0 0 8px">Verify your email</h2>
+      <p style="color:#444;margin:0 0 16px">Use this code to continue signing in to Concord Xpress.</p>
+      <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#2ECC8F;text-align:center;padding:16px;background:#f4f6f9;border-radius:12px">${otp}</div>
+      <p style="color:#888;font-size:12px;margin:16px 0 0">This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p>
+    </div>`,
+  });
+}
 
 async function generateOTP(key) {
   const otp     = Math.floor(100000 + Math.random() * 900000).toString();
   const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   await supabase.from('otp_store').upsert({ key, otp, expires, attempts: 0 }, { onConflict: 'key' });
-  console.log('[OTP] ' + key + ': ' + otp);
+  if (!IS_PROD) console.log('[OTP] ' + key + ': ' + otp);
   return otp;
 }
 
@@ -66,7 +93,12 @@ router.post('/send-otp', async (req, res) => {
 
     const otp = await generateOTP(e164);
 
-    // Send via Twilio if configured
+    // In production, if SMS can't be sent we surface an error rather than leak
+    // the code. Locally we fall back to returning it so the team can test.
+    const smsUnavailable = () => IS_PROD
+      ? res.status(503).json({ error: 'Could not send the SMS code. Please try again shortly.' })
+      : res.json({ success: true, message: 'OTP sent (dev)', dev_otp: otp });
+
     if (twilioClient) {
       try {
         await twilioClient.messages.create({
@@ -75,16 +107,13 @@ router.post('/send-otp', async (req, res) => {
           to:   e164,
         });
         console.log('[OTP] SMS sent to', e164);
-        res.json({ success: true, message: 'OTP sent' });
+        return res.json({ success: true, message: 'OTP sent' });
       } catch (smsErr) {
         console.error('[Twilio] SMS failed:', smsErr.message);
-        // Fall back to dev mode
-        res.json({ success: true, message: 'OTP sent', dev_otp: otp });
+        return smsUnavailable();
       }
-    } else {
-      // Dev mode — return OTP in response
-      res.json({ success: true, message: 'OTP sent', dev_otp: otp });
     }
+    return smsUnavailable();
   } catch (err) {
     res.status(500).json({ error: 'Failed to send OTP' });
   }
@@ -97,9 +126,10 @@ router.post('/verify-otp', async (req, res) => {
     // Use phone as-is if already in E.164 format, otherwise normalize
     const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
 
-    // Dev bypass — master OTP code for testing
+    // Dev bypass — master OTP code for local testing only. Disabled in
+    // production so a fixed code can never authenticate a real account.
     const DEV_OTP = process.env.DEV_OTP || '000000';
-    const isDevBypass = otp === DEV_OTP;
+    const isDevBypass = !IS_PROD && otp === DEV_OTP;
 
     if (!isDevBypass) {
       // Verify OTP normally
@@ -188,8 +218,17 @@ router.post('/send-email-otp', async (req, res) => {
     if (!email) return res.status(400).json({ error: 'Email is required' });
     const e = email.toLowerCase().trim();
     const otp = await generateOTP(e);
-    // Always send OTP regardless of whether user exists — account created on verify
-    res.json({ success: true, message: 'Code sent to your email', dev_otp: otp });
+    // Send a real email via Resend. Account is created later, on verify.
+    try {
+      await sendOtpEmail(e, otp);
+      console.log('[OTP] email sent to', e);
+      return res.json({ success: true, message: 'Code sent to your email' });
+    } catch (mailErr) {
+      console.error('[Resend] email failed:', mailErr.message);
+      return IS_PROD
+        ? res.status(503).json({ error: 'Could not send the email code. Please try again shortly.' })
+        : res.json({ success: true, message: 'Code sent (dev)', dev_otp: otp });
+    }
   } catch (err) {
     res.status(500).json({ error: 'Failed to send email code' });
   }
