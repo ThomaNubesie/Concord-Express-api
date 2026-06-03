@@ -16,6 +16,16 @@ const { isProd, exposeDevCodeAllowed, isMasterBypass } = require('../lib/authPol
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// App Review demo login — a single configured demo identity + fixed code that
+// works even in production, gated to EXACTLY this phone/email. Lets App Store /
+// Play reviewers sign in past the SMS/email OTP. Set DEMO_PHONE / DEMO_EMAIL /
+// DEMO_OTP on the server; leave unset to disable entirely.
+const DEMO_PHONE = (process.env.DEMO_PHONE || '').replace(/\s/g, '');
+const DEMO_EMAIL = (process.env.DEMO_EMAIL || '').toLowerCase().trim();
+const DEMO_OTP   = process.env.DEMO_OTP   || '';
+const isDemoPhone = (e164) => !!(DEMO_OTP && DEMO_PHONE && e164 === DEMO_PHONE);
+const isDemoEmail = (email) => !!(DEMO_OTP && DEMO_EMAIL && email === DEMO_EMAIL);
+
 async function generateOTP(key) {
   const otp     = Math.floor(100000 + Math.random() * 900000).toString();
   const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
@@ -54,6 +64,11 @@ router.post('/send-otp', async (req, res) => {
     const { phone, isNewUser } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
     const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
+
+    // App Review demo number — don't send a real SMS; reviewer enters DEMO_OTP.
+    if (isDemoPhone(e164)) {
+      return res.json({ success: true, message: 'OTP sent' });
+    }
 
     const { data: existing } = await supabase
       .from('users').select('id').eq('phone', e164).single();
@@ -113,8 +128,10 @@ router.post('/verify-otp', async (req, res) => {
     // Master OTP bypass for local testing only — disabled in production so a
     // fixed code can never authenticate a real account (see lib/authPolicy).
     const isDevBypass = isMasterBypass(otp);
+    // App Review demo login: the configured demo phone + DEMO_OTP, prod-safe.
+    const isDemo = isDemoPhone(e164) && otp === DEMO_OTP;
 
-    if (!isDevBypass) {
+    if (!isDevBypass && !isDemo) {
       // Verify OTP normally
       const stored = await getOTP(e164);
       if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
@@ -156,9 +173,10 @@ router.post('/verify-otp', async (req, res) => {
       }
       user = existingUser;
     } else {
-      // No account for this phone. Only create one during an explicit sign-up —
-      // a sign-in for an unregistered number must NOT auto-create an account.
-      if (!isNewUser) {
+      // No account for this phone. Only create one during an explicit sign-up
+      // (or the App Review demo login) — a normal sign-in for an unregistered
+      // number must NOT auto-create an account.
+      if (!isNewUser && !isDemo) {
         return res.status(404).json({
           error: 'No account found. Please sign up first.',
           code: 'NO_ACCOUNT',
@@ -208,6 +226,10 @@ router.post('/send-email-otp', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email is required' });
     const e = email.toLowerCase().trim();
+    // App Review demo email — don't send a real email; reviewer enters DEMO_OTP.
+    if (isDemoEmail(e)) {
+      return res.json({ success: true, message: 'Code sent to your email' });
+    }
     const otp = await generateOTP(e);
     // Send a real email via Resend. Account is created later, on verify.
     try {
@@ -230,12 +252,16 @@ router.post('/verify-email-otp', async (req, res) => {
     const { email, otp, fullName, country, language } = req.body;
     if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
     const e = email.toLowerCase().trim();
-    const stored = await getOTP(e);
-    if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
-    if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e); return res.status(400).json({ error: 'Code expired.' }); }
-    if (stored.attempts >= 5) { await deleteOTP(e); return res.status(400).json({ error: 'Too many attempts.' }); }
-    if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e); return res.status(400).json({ error: 'Invalid code.' }); }
-    await deleteOTP(e);
+    // App Review demo email login: configured demo email + DEMO_OTP, prod-safe.
+    const isDemo = isDemoEmail(e) && otp === DEMO_OTP;
+    if (!isDemo) {
+      const stored = await getOTP(e);
+      if (!stored) return res.status(400).json({ error: 'No code found. Request a new one.' });
+      if (Date.now() > new Date(stored.expires).getTime()) { await deleteOTP(e); return res.status(400).json({ error: 'Code expired.' }); }
+      if (stored.attempts >= 5) { await deleteOTP(e); return res.status(400).json({ error: 'Too many attempts.' }); }
+      if (stored.otp !== otp) { await supabase.from('otp_store').update({ attempts: stored.attempts + 1 }).eq('key', e); return res.status(400).json({ error: 'Invalid code.' }); }
+      await deleteOTP(e);
+    }
     const safeName = ((fullName || 'Concord User').replace(/[^\x00-\x7F]/g, '').trim()) || 'Concord User';
     let { data: user } = await supabase.from('users').select('*').eq('email', e).single();
     if (!user) {
