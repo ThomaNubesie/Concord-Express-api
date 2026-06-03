@@ -49,6 +49,13 @@ describe('sendOtpEmail', () => {
     expect(mockSend.mock.calls[0][0].from).toBe('no-reply@concordexpress.ca');
   });
 
+  it('throws when Resend returns an { error } (e.g. unverified domain)', async () => {
+    process.env.RESEND_API_KEY = 're_test_123';
+    _resetClient();
+    mockSend.mockResolvedValueOnce({ data: null, error: { message: 'The concordexpress.ca domain is not verified.' } });
+    await expect(sendOtpEmail('user@example.com', '555666')).rejects.toThrow(/not verified/);
+  });
+
   it('propagates a send failure to the caller', async () => {
     process.env.RESEND_API_KEY = 're_test_123';
     _resetClient();

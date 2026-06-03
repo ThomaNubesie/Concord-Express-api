@@ -28,13 +28,17 @@ function otpEmailHtml(otp) {
 async function sendOtpEmail(to, otp) {
   const client = getClient();
   if (!client) throw new Error('Email provider not configured (RESEND_API_KEY missing)');
-  await client.emails.send({
+  // Resend returns { data, error } — it does NOT throw on API errors (e.g.
+  // unverified domain, test-sender recipient restriction). We must inspect
+  // `error` ourselves, or a failed send looks like success.
+  const { error } = await client.emails.send({
     from:    process.env.FROM_EMAIL || 'no-reply@concordexpress.ca',
     to,
     subject: 'Your ConcordXpress verification code',
     text:    `Your ConcordXpress verification code is ${otp}. It is valid for 10 minutes.`,
     html:    otpEmailHtml(otp),
   });
+  if (error) throw new Error(error.message || error.name || 'Resend send failed');
 }
 
 module.exports = { sendOtpEmail, otpEmailHtml, _resetClient };
