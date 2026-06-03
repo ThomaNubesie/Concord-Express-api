@@ -46,7 +46,7 @@ describe('sendOtpEmail', () => {
     process.env.RESEND_API_KEY = 're_test_123';
     _resetClient();
     await sendOtpEmail('user@example.com', '111222');
-    expect(mockSend.mock.calls[0][0].from).toBe('no-reply@concordxpress.ca');
+    expect(mockSend.mock.calls[0][0].from).toBe('no-reply@concordexpress.ca');
   });
 
   it('propagates a send failure to the caller', async () => {
