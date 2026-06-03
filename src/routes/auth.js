@@ -55,14 +55,22 @@ router.post('/send-otp', async (req, res) => {
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
     const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
 
-    // If signing up (not signing in), check phone not already registered
+    const { data: existing } = await supabase
+      .from('users').select('id').eq('phone', e164).single();
     if (isNewUser) {
-      const { data: existing } = await supabase
-        .from('users').select('id').eq('phone', e164).single();
+      // Sign-up: phone must NOT already be registered.
       if (existing) {
         return res.status(409).json({
           error: 'This phone number is already registered. Please sign in instead.',
           code: 'PHONE_EXISTS',
+        });
+      }
+    } else {
+      // Sign-in: only send a code to a registered number — never auto-create.
+      if (!existing) {
+        return res.status(404).json({
+          error: 'No account found with this number. Please sign up first.',
+          code: 'NO_ACCOUNT',
         });
       }
     }
@@ -148,6 +156,14 @@ router.post('/verify-otp', async (req, res) => {
       }
       user = existingUser;
     } else {
+      // No account for this phone. Only create one during an explicit sign-up —
+      // a sign-in for an unregistered number must NOT auto-create an account.
+      if (!isNewUser) {
+        return res.status(404).json({
+          error: 'No account found. Please sign up first.',
+          code: 'NO_ACCOUNT',
+        });
+      }
       // New user — check email uniqueness if provided
       if (safeEmail) {
         const { data: emailConflict } = await supabase
