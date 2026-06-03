@@ -17,7 +17,7 @@ function _resetClient() { _client = undefined; }
 function otpEmailHtml(otp) {
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:420px;margin:0 auto;padding:24px">
       <h2 style="color:#0a0a0a;margin:0 0 8px">Verify your email</h2>
-      <p style="color:#444;margin:0 0 16px">Use this code to continue signing in to Concord Xpress.</p>
+      <p style="color:#444;margin:0 0 16px">Use this code to continue signing in to ConcordXpress.</p>
       <div style="font-size:32px;font-weight:800;letter-spacing:8px;color:#2ECC8F;text-align:center;padding:16px;background:#f4f6f9;border-radius:12px">${otp}</div>
       <p style="color:#888;font-size:12px;margin:16px 0 0">This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p>
     </div>`;
@@ -31,8 +31,8 @@ async function sendOtpEmail(to, otp) {
   await client.emails.send({
     from:    process.env.FROM_EMAIL || 'no-reply@concordxpress.ca',
     to,
-    subject: 'Your Concord Xpress verification code',
-    text:    `Your Concord Xpress verification code is ${otp}. It is valid for 10 minutes.`,
+    subject: 'Your ConcordXpress verification code',
+    text:    `Your ConcordXpress verification code is ${otp}. It is valid for 10 minutes.`,
     html:    otpEmailHtml(otp),
   });
 }

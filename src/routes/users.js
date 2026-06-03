@@ -72,9 +72,18 @@ router.get('/:id', async (req, res) => {
 });
 
 router.delete('/me', verifyAuth, async (req, res) => {
-  await supabase.auth.admin.deleteUser(req.userId);
-  await supabase.from('users').delete().eq('id', req.userId);
-  res.json({ success: true });
+  try {
+    // Accounts live in our custom `users` table (phone OTP + JWT), not Supabase
+    // Auth — so the auth-admin delete is best-effort and must never fail the
+    // request (it throws when there's no matching auth user).
+    try { await supabase.auth.admin.deleteUser(req.userId); } catch (_) {}
+    const { error } = await supabase.from('users').delete().eq('id', req.userId);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Users] delete account error:', err.message);
+    res.status(500).json({ error: 'Could not delete your account. Please try again.' });
+  }
 });
 
 // PATCH /api/users/language

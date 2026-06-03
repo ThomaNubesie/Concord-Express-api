@@ -52,7 +52,7 @@ app.use('/api/', limiter);
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'Concord Xpress API', version: '1.0.0', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', service: 'ConcordXpress API', version: '1.0.0', timestamp: new Date().toISOString() });
 });
 
 app.get('/health/deep', async (req, res) => {
@@ -64,7 +64,7 @@ app.get('/health/deep', async (req, res) => {
   const allOk = checks.database === 'ok';
   res.status(allOk ? 200 : 503).json({
     status: allOk ? 'ok' : 'degraded',
-    service: 'Concord Xpress API',
+    service: 'ConcordXpress API',
     version: '1.0.0',
     ...checks,
     uptime: Math.floor(process.uptime()) + 's',
@@ -105,7 +105,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log('🍁 Concord Xpress API running on port ' + PORT);
+  console.log('🍁 ConcordXpress API running on port ' + PORT);
   console.log('   Environment: ' + process.env.NODE_ENV);
   console.log('   Supabase:    ' + process.env.SUPABASE_URL);
 

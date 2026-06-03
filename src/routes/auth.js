@@ -78,7 +78,7 @@ router.post('/send-otp', async (req, res) => {
     if (twilioClient) {
       try {
         await twilioClient.messages.create({
-          body: `Your Concord Xpress verification code is: ${otp}. Valid for 10 minutes.`,
+          body: `Your ConcordXpress verification code is: ${otp}. Valid for 10 minutes.`,
           from: process.env.TWILIO_PHONE_NUMBER,
           to:   e164,
         });
