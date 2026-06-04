@@ -483,7 +483,11 @@ router.post('/', verifyAuth, async (req, res) => {
             pickup_stops, dropoff_stops, preferences = {}, notes, accepts_packages, package_types, max_package_kg,
             booking_type = 'direct',
     cashOnly = false,
-            is_transit = false, is_recurring = false, recurring_days } = req.body;
+            is_transit = false, is_recurring = false, recurring_days,
+            // Per-trip vehicle snapshot — the car the driver chose for THIS trip.
+            // Falls back to the driver's profile vehicle when omitted.
+            vehicle_make, vehicle_model, vehicle_year, vehicle_color,
+            vehicle_plate, vehicle_province, vehicle_seats, vehicle_image_url } = req.body;
 
     if (!from_city || !to_city || !departure_at || !seats_total || !price_per_seat) {
       return res.status(400).json({ error: 'Missing required trip fields' });
@@ -530,6 +534,14 @@ router.post('/', verifyAuth, async (req, res) => {
       pref_wait_mins:   [3, 5, 10].includes(preferences.waitMins) ? preferences.waitMins : 3,
       cash_only:        cashOnly ?? false,
       pref_luggage:     Array.isArray(preferences.luggage) ? preferences.luggage : (preferences.luggage ? [preferences.luggage] : ['all']),
+      vehicle_make:      vehicle_make      ?? null,
+      vehicle_model:     vehicle_model     ?? null,
+      vehicle_year:      vehicle_year      ?? null,
+      vehicle_color:     vehicle_color     ?? null,
+      vehicle_plate:     vehicle_plate     ?? null,
+      vehicle_province:  vehicle_province  ?? null,
+      vehicle_seats:     vehicle_seats     ?? null,
+      vehicle_image_url: vehicle_image_url ?? null,
     }).select().single();
     if (tripError) throw tripError;
 
@@ -581,7 +593,9 @@ router.patch('/:id', verifyAuth, async (req, res) => {
       ? ['seats_total','price_per_seat','departure_at','notes','booking_closes_at',
          'pref_ac','pref_music','pref_pets','pref_smoking','pref_no_eating',
          'pref_no_drinks','pref_shoes_on','pref_quiet_ride','pref_brief_calls',
-         'pref_temperature','pref_extra_stops','pref_children','pref_wait_mins','pref_luggage']
+         'pref_temperature','pref_extra_stops','pref_children','pref_wait_mins','pref_luggage',
+         'vehicle_make','vehicle_model','vehicle_year','vehicle_color',
+         'vehicle_plate','vehicle_province','vehicle_seats','vehicle_image_url']
       : ['notes','pref_ac','pref_music','pref_pets','pref_smoking','pref_no_eating',
          'pref_no_drinks','pref_shoes_on','pref_quiet_ride','pref_brief_calls',
          'pref_temperature','pref_extra_stops','pref_children','pref_wait_mins','pref_luggage'];
