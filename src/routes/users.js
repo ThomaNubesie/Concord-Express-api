@@ -38,6 +38,39 @@ router.patch('/me/driver-profile', verifyAuth, async (req, res) => {
   res.json({ driver_profile: data });
 });
 
+// POST /api/users/me/avatar — upload a profile picture
+const multer = require('multer');
+const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+router.post('/me/avatar', verifyAuth, avatarUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file provided' });
+    if (!/^image\//.test(req.file.mimetype || '')) {
+      return res.status(400).json({ error: 'File must be an image' });
+    }
+
+    const ext  = (req.file.mimetype.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+    const path = `${req.userId}/${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+
+    const { data, error } = await supabase
+      .from('users').update({ avatar_url: publicUrl }).eq('id', req.userId)
+      .select().single();
+    if (error) throw error;
+
+    res.json({ user: data, avatar_url: publicUrl });
+  } catch (err) {
+    console.error('[Users] avatar upload error:', err.message);
+    res.status(500).json({ error: 'Could not upload your photo. Please try again.' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('users')

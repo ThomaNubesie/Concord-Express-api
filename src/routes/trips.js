@@ -479,6 +479,48 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// GET /api/trips/:id/contacts — phone numbers of trip counterparts.
+// Privacy-gated: only returns numbers once the driver has started the trip
+// (trip.status === 'active'), and only to participants of that trip.
+// Driver → active passengers' numbers; passenger → the driver's number.
+router.get('/:id/contacts', verifyAuth, async (req, res) => {
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select(`id, driver_id, status,
+        driver:users!trips_driver_id_fkey(id, full_name, phone),
+        bookings(id, status, passenger:users!bookings_passenger_id_fkey(id, full_name, phone))`)
+      .eq('id', req.params.id)
+      .single();
+    if (error || !trip) return res.status(404).json({ error: 'Trip not found' });
+
+    const isDriver = trip.driver_id === req.userId;
+    const activeBookings = (trip.bookings || []).filter(b => ['confirmed', 'active'].includes(b.status));
+    const isPassenger = activeBookings.some(b => b.passenger?.id === req.userId);
+    if (!isDriver && !isPassenger) return res.status(403).json({ error: 'Not a trip participant' });
+
+    // Calling is only enabled once the trip is underway.
+    if (trip.status !== 'active') {
+      return res.json({ started: false, role: isDriver ? 'driver' : 'passenger', contacts: [] });
+    }
+
+    let contacts = [];
+    if (isDriver) {
+      contacts = activeBookings
+        .map(b => b.passenger)
+        .filter(p => p && p.phone)
+        .map(p => ({ id: p.id, full_name: p.full_name, phone: p.phone, role: 'passenger' }));
+    } else if (trip.driver?.phone) {
+      contacts = [{ id: trip.driver.id, full_name: trip.driver.full_name, phone: trip.driver.phone, role: 'driver' }];
+    }
+
+    res.json({ started: true, role: isDriver ? 'driver' : 'passenger', contacts });
+  } catch (err) {
+    console.error('[trips] contacts error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch contacts' });
+  }
+});
+
 // POST /api/trips
 router.post('/', verifyAuth, async (req, res) => {
   try {
