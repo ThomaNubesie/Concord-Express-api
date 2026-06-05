@@ -312,23 +312,26 @@ router.get('/', async (req, res) => {
     });
 
     // Apply priority sorting
-    // Always boost real driver trips to top within same hour
-    const isRealDriver = (t) => !!t.driver?.email;
+    // Always boost real driver trips to top within same hour.
+    // Seeded drivers use @concordxpress.ca emails — treat those as fake (real
+    // drivers, incl. phone-only signups without an email, count as real).
+    const isFakeDriver = (t) => /@concordxpress\.ca$/i.test(t.driver?.email || '');
+    const isRealDriver = (t) => !isFakeDriver(t);
     if (priority === 'price') {
       filtered.sort((a, b) => {
-        if (!!a.driver?.email !== !!b.driver?.email) return a.driver?.email ? -1 : 1;
+        if (isRealDriver(a) !== isRealDriver(b)) return isRealDriver(a) ? -1 : 1;
         return a.price_per_seat - b.price_per_seat;
       });
     } else if (priority === 'comfort') {
       filtered.sort((a, b) => {
-        if (!!a.driver?.email !== !!b.driver?.email) return a.driver?.email ? -1 : 1;
+        if (isRealDriver(a) !== isRealDriver(b)) return isRealDriver(a) ? -1 : 1;
         return getComfortScore(b) - getComfortScore(a);
       });
     } else {
       // time priority — real drivers first within same hour bucket
       filtered.sort((a, b) => {
-        const aReal = !!a.driver?.email;
-        const bReal = !!b.driver?.email;
+        const aReal = isRealDriver(a);
+        const bReal = isRealDriver(b);
         if (aReal !== bReal) return aReal ? -1 : 1;
         return new Date(a.departure_at).getTime() - new Date(b.departure_at).getTime();
       });
@@ -344,7 +347,7 @@ router.get('/', async (req, res) => {
       seats_available: trip.seats_total - trip.seats_booked,
       availability:    getTripAvailability(trip),
       comfort_score:   getComfortScore(trip),
-      is_fake: false, // fake status handled by driver account, not seat count
+      is_fake: isFakeDriver(trip), // true for seeded @concordxpress.ca drivers
       avatar_url: trip.driver?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(trip.driver?.full_name || "driver")}0026backgroundColor=b6e3f4,c0aede,d1d4f9`,
     }));
 
