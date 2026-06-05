@@ -47,7 +47,7 @@ router.get('/:id', async (req, res) => {
       total_trips, total_trips_driver,
       is_verified, is_founding_member, country, language,
       created_at, total_co2_saved_kg,
-      driver_profile (
+      driver_profile:driver_profiles (
         id, vehicle_make, vehicle_model, vehicle_year,
         vehicle_color, vehicle_plate, vehicle_seats,
         vehicle_image_url, identity_verified, bio
