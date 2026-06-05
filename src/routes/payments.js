@@ -368,6 +368,15 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
   try {
     const { payment_method_id, role, is_founding_member } = req.body;
 
+    // Idempotency guard: never charge a user who has already paid the
+    // verification fee. Protects against a double-charge if the verification
+    // flow is re-entered (role switch, re-onboarding, retry, etc.).
+    const { data: paidCheck } = await supabase
+      .from('users').select('verification_fee_paid').eq('id', req.userId).single();
+    if (paidCheck?.verification_fee_paid) {
+      return res.json({ success: true, already_paid: true });
+    }
+
     const VERIFY_FEE  = 399;  // C$3.99 in cents
     const DRIVER_FEE  = is_founding_member ? 1000 : 2000; // C$10 or C$20
 
