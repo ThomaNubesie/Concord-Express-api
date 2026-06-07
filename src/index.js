@@ -112,6 +112,10 @@ app.listen(PORT, "0.0.0.0", () => {
   // Start trip departure reminder scheduler
   const { startTripReminders } = require('./lib/tripReminders');
   startTripReminders();
+
+  // Settle Stripe holds/refunds for system-cancelled bookings (no-show / unapproved)
+  const { startNoshowRefunds } = require('./lib/noshowRefunds');
+  startNoshowRefunds();
 });
 
 module.exports = app;
