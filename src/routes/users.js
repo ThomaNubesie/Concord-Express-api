@@ -71,6 +71,66 @@ router.post('/me/avatar', verifyAuth, avatarUpload.single('file'), async (req, r
   }
 });
 
+// GET /api/users/me/savings — what the passenger saved vs other modes.
+// Train/Bus: fixed per-corridor reference fares (mode_prices table).
+// POP (Poparide) / Kangaroo (Amigo): the SAME ride fare the passenger paid
+// plus that platform's fee, since carpool ride prices are comparable. Compared
+// against the passenger's ConcordXpress all-in cost (fare + C$2.99/seat).
+router.get('/me/savings', verifyAuth, async (req, res) => {
+  try {
+    const CX_FEE = 2.99;      // ConcordXpress booking fee per seat
+    const POP_PCT = 0.15;     // Poparide service fee (% of ride)
+    const AMIGO_FEE = 7.00;   // Amigo Express reservation fee per seat
+
+    const { data: bookings } = await supabase
+      .from('bookings')
+      .select('seats, fare_amount, trip:trips(from_city, to_city)')
+      .eq('passenger_id', req.userId)
+      .eq('status', 'completed');
+
+    const { data: prices } = await supabase
+      .from('mode_prices').select('from_city, to_city, mode, price_cad');
+    const priceMap = {};
+    for (const p of prices || []) {
+      const k = `${p.from_city}|${p.to_city}`;
+      (priceMap[k] = priceMap[k] || {})[p.mode] = parseFloat(p.price_cad);
+    }
+
+    const m = {
+      train:    { ref: 0, saved: 0, trips: 0 },
+      bus:      { ref: 0, saved: 0, trips: 0 },
+      pop:      { ref: 0, saved: 0, trips: 0 },
+      kangaroo: { ref: 0, saved: 0, trips: 0 },
+    };
+    let trips = 0, totalPaid = 0;
+
+    for (const b of bookings || []) {
+      const seats = b.seats || 1;
+      const ride  = parseFloat(b.fare_amount || 0); // total ride fare (all seats)
+      if (ride <= 0) continue;
+      const cxCost = ride + CX_FEE * seats;
+      trips++; totalPaid += cxCost;
+
+      const rp = priceMap[`${b.trip?.from_city}|${b.trip?.to_city}`] || {};
+      // carpools — always comparable
+      const popCost = ride * (1 + POP_PCT);
+      const kanCost = ride + AMIGO_FEE * seats;
+      m.pop.ref += popCost;      m.pop.saved += popCost - cxCost;      m.pop.trips++;
+      m.kangaroo.ref += kanCost; m.kangaroo.saved += kanCost - cxCost; m.kangaroo.trips++;
+      // fixed-price modes — only when we have a reference fare for the route
+      if (rp.train != null) { const c = rp.train * seats; m.train.ref += c; m.train.saved += c - cxCost; m.train.trips++; }
+      if (rp.bus   != null) { const c = rp.bus   * seats; m.bus.ref   += c; m.bus.saved   += c - cxCost; m.bus.trips++; }
+    }
+
+    const r2 = x => Math.round(x * 100) / 100;
+    for (const k of Object.keys(m)) { m[k].ref = r2(m[k].ref); m[k].saved = r2(m[k].saved); }
+    res.json({ trips, total_paid: r2(totalPaid), modes: m });
+  } catch (err) {
+    console.error('[savings]', err.message);
+    res.status(500).json({ error: 'Failed to compute savings' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   const { data, error } = await supabase
     .from('users')
