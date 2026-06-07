@@ -239,7 +239,7 @@ router.get('/payout-history', verifyAuth, async (req, res) => {
 router.get('/pending-trips', verifyAuth, async (req, res) => {
   try {
     const { data: trips, error } = await supabase.from('trips')
-      .select('id, from_city, to_city, departure_at, bookings(id, passenger_id, fare_amount, seats, status, passenger:users!bookings_passenger_id_fkey(full_name))')
+      .select('id, from_city, to_city, departure_at, cash_only, bookings(id, passenger_id, fare_amount, seats, status, passenger:users!bookings_passenger_id_fkey(full_name))')
       .eq('driver_id', req.userId)
       .eq('status', 'completed')
       .is('payout_id', null)
@@ -247,7 +247,13 @@ router.get('/pending-trips', verifyAuth, async (req, res) => {
       .limit(30);
     if (error) throw error;
 
-    const result = (trips || []).map(t => {
+    const result = (trips || [])
+      // Cash trips are paid in cash directly to the driver (Stripe only took the
+      // booking fee), so the platform never holds those funds — they can be
+      // tabulated in earnings but never cashed out. Only electronic (escrow)
+      // trips are payout-eligible.
+      .filter(t => !t.cash_only)
+      .map(t => {
       const bookings = (t.bookings || []).filter(b => ['confirmed','completed'].includes(b.status));
       const gross = bookings.reduce((s, b) => s + parseFloat(b.fare_amount || 0), 0);
       return {
