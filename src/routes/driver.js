@@ -99,7 +99,7 @@ router.get('/analytics', verifyAuth, async (req, res) => {
     // Get completed trips driven by this driver in period
     const { data: trips, error: tripsErr } = await supabase
       .from('trips')
-      .select('id, departure_at, bookings(id, fare_amount, seats, status)')
+      .select('id, departure_at, cash_only, bookings(id, fare_amount, seats, status)')
       .eq('driver_id', req.userId)
       .in('status', ['completed', 'active'])
       .gte('departure_at', startDate.toISOString());
@@ -124,19 +124,26 @@ router.get('/analytics', verifyAuth, async (req, res) => {
       .eq('driver_id', req.userId)
       .eq('status', 'completed');
 
-    let gross = 0, passengers = 0, uniqueTrips = 0;
+    // Split fares by how they were paid: cash is collected directly by the
+    // driver (kept 100%, not cashable); electronic goes through Stripe escrow
+    // (driver nets 90%, cashable). Package earnings are electronic.
+    let cashGross = 0, electronicGross = 0, passengers = 0, uniqueTrips = 0;
     for (const trip of trips || []) {
       const completedBookings = (trip.bookings || []).filter(b =>
         ['confirmed', 'active', 'completed'].includes(b.status)
       );
       if (completedBookings.length > 0 || true) uniqueTrips++;
       for (const b of completedBookings) {
-        gross += parseFloat(b.fare_amount || 0);
+        const fare = parseFloat(b.fare_amount || 0);
+        if (trip.cash_only) cashGross += fare; else electronicGross += fare;
         passengers += b.seats || 1;
       }
     }
-    gross += pkgEarnings;
-    const net = gross * 0.9;
+    // Driver-facing totals
+    const cashEarnings   = +cashGross.toFixed(2);                          // cash in hand, 100%
+    const electronicNet  = +(electronicGross * 0.9 + pkgEarnings).toFixed(2); // cashable payout
+    const gross = +(cashGross + electronicGross + pkgEarnings).toFixed(2); // total tabulated (legacy)
+    const net   = +(gross * 0.9).toFixed(2);                              // legacy field, kept for compat
 
     // Build daily earnings breakdown
     const dailyMap = {};
@@ -171,7 +178,11 @@ router.get('/analytics', verifyAuth, async (req, res) => {
     const { data: dp } = await supabase.from('driver_profiles').select('pending_balance, total_paid_out').eq('user_id', req.userId).single();
 
     res.json({
-      gross, net, trips: uniqueTrips, passengers, pkg_earnings: pkgEarnings,
+      gross, net,
+      cash_earnings: cashEarnings,        // collected in cash, kept 100%, NOT cashable
+      electronic_net: electronicNet,      // cashable payout (90% of electronic fares + packages)
+      electronic_gross: +electronicGross.toFixed(2),
+      trips: uniqueTrips, passengers, pkg_earnings: pkgEarnings,
       all_time_trips: allTimeTrips || 0, daily, rating_breakdown: ratingBreakdown,
       avg_rating: avgRating, cancellation_count: cancelCount || 0,
       pkg_delivered: pkgDelivered, pkg_pending: pkgPending,
