@@ -372,7 +372,7 @@ router.get('/identity-status', verifyAuth, async (req, res) => {
 // POST /api/payments/verification-fee — Charge verification fee (+ optional driver subscription)
 router.post('/verification-fee', verifyAuth, async (req, res) => {
   try {
-    const { payment_method_id, role, is_founding_member } = req.body;
+    const { payment_method_id, role, is_founding_member, province } = req.body;
 
     // Idempotency guard: never charge a user who has already paid the
     // verification fee. Protects against a double-charge if the verification
@@ -414,11 +414,17 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
       return res.json({ success: true, waived: true });
     }
 
-    const totalCents  = role === 'passenger'
+    const subtotalCents = role === 'passenger'
       ? VERIFY_FEE
       : role === 'driver' || role === 'both'
       ? VERIFY_FEE + DRIVER_FEE
       : VERIFY_FEE;
+    // Tax auto by province (HST/GST/QST). Authoritative server-side calc; the
+    // app sends the resolved province. Non-CA / unknown defaults to ON 13%.
+    const PROVINCE_TAX = { ON:0.13, QC:0.14975, NB:0.15, NL:0.15, NS:0.15, PE:0.15, BC:0.12, MB:0.12, SK:0.11, AB:0.05, NT:0.05, NU:0.05, YT:0.05 };
+    const taxRate     = PROVINCE_TAX[String(province || 'ON').toUpperCase()] ?? 0.13;
+    const taxCents    = Math.round(subtotalCents * taxRate);
+    const totalCents  = subtotalCents + taxCents;
 
     const { data: user } = await supabase
       .from('users').select('stripe_customer_id, full_name, email').eq('id', req.userId).single();
@@ -443,7 +449,7 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
       description:      role === 'passenger'
         ? 'ConcordXpress identity verification'
         : `ConcordXpress verification + driver subscription (${is_founding_member ? 'founder' : 'standard'})`,
-      metadata: { user_id: req.userId, role, is_founding_member: String(!!is_founding_member) },
+      metadata: { user_id: req.userId, role, is_founding_member: String(!!is_founding_member), subtotal_cents: String(subtotalCents), tax_cents: String(taxCents), province: String(province || '') },
     });
 
     if (!['succeeded','processing'].includes(paymentIntent.status)) {
