@@ -3,6 +3,7 @@ const router   = express.Router();
 const supabase = require('../lib/supabase');
 const stripe   = require('../lib/stripe');
 const { verifyAuth } = require('../middleware/auth');
+const { sendReceiptEmail } = require('../lib/email');
 
 router.post('/setup-intent', verifyAuth, async (req, res) => {
   try {
@@ -478,6 +479,26 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
     res.json({ success: true, payment_intent_id: paymentIntent.id, amount: totalCents });
   } catch (err) {
     console.error('[VerificationFee] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/payments/verification-receipt — Email the verification receipt to the user.
+router.post('/verification-receipt', verifyAuth, async (req, res) => {
+  try {
+    const { receiptId, lines, subtotal, tax, total, province, date } = req.body;
+    const { data: user } = await supabase
+      .from('users').select('email').eq('id', req.userId).single();
+    if (!user?.email) return res.status(400).json({ error: 'No email on file' });
+    try {
+      await sendReceiptEmail(user.email, { receiptId, lines, subtotal, tax, total, province, date });
+      return res.json({ success: true, emailed_to: user.email });
+    } catch (mailErr) {
+      console.error('[Receipt] email failed:', mailErr.message);
+      return res.status(503).json({ error: 'Could not email the receipt. It is saved in the app.' });
+    }
+  } catch (err) {
+    console.error('[Receipt] error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
