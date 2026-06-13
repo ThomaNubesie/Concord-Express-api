@@ -7,7 +7,8 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "jest",
-    "backfill-customers": "node scripts/backfill-stripe-customers.js"
+    "backfill-customers": "node scripts/backfill-stripe-customers.js",
+    "charge-fee": "node scripts/charge-fee.js"
   },
   "engines": {
     "node": ">=20.0.0"
