@@ -460,20 +460,37 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: 'Payment failed. Please check your card.' });
     }
 
-    await supabase.from('users')
+    // The card has now been charged. The DB write-backs below MUST be checked —
+    // supabase-js returns errors instead of throwing, so an unchecked update can
+    // silently no-op (this is exactly how a charge could succeed while the
+    // profile never got marked paid).
+    const { error: userErr } = await supabase.from('users')
       .update({ verification_fee_paid: true })
       .eq('id', req.userId);
+    if (userErr) console.error('[VerificationFee] users.verification_fee_paid write failed:', userErr.message);
 
     if (role === 'driver' || role === 'both') {
-      const expiresAt = new Date();
+      const now       = new Date();
+      const expiresAt = new Date(now);
       expiresAt.setFullYear(expiresAt.getFullYear() + 1);
-      await supabase.from('driver_profiles')
+      // Write the columns the app actually reads (driver_profiles.fee_*), the
+      // same ones /api/driver/fee uses. (The old code wrote subscription_paid /
+      // subscription_expires, which don't exist — so fee_paid never flipped.)
+      const { error: dpErr } = await supabase.from('driver_profiles')
         .update({
-          subscription_paid:    true,
-          subscription_expires: expiresAt.toISOString(),
-          is_founding_member:   !!is_founding_member,
+          fee_paid:           true,
+          fee_paid_at:        now.toISOString(),
+          fee_expires_at:     expiresAt.toISOString(),
+          fee_amount:         DRIVER_FEE / 100,
+          is_founding_member: !!is_founding_member,
         })
         .eq('user_id', req.userId);
+      if (dpErr) {
+        // Surface it: the driver paid but isn't credited. Idempotency
+        // (verification_fee_paid above) prevents a double-charge on retry.
+        console.error('[VerificationFee] driver_profiles fee write FAILED after charge:', dpErr.message);
+        return res.status(500).json({ error: 'Payment received but profile update failed — please contact support.', payment_intent_id: paymentIntent.id });
+      }
     }
 
     res.json({ success: true, payment_intent_id: paymentIntent.id, amount: totalCents });
