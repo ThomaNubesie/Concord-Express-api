@@ -23,9 +23,17 @@ if (process.env.NODE_ENV === 'production') {
     next();
   });
 }
+// Allowed browser origins in production. Includes the real site
+// (concordexpress.ca, with the "e") + www, both spellings as a safety net, and
+// any FRONTEND_URL override (comma-separated).
+const ALLOWED_ORIGINS = new Set([
+  'https://concordexpress.ca', 'https://www.concordexpress.ca',
+  'https://concordxpress.ca',  'https://www.concordxpress.ca',
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map((s) => s.trim()) : []),
+]);
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? (process.env.FRONTEND_URL || 'https://concordxpress.ca').split(',')
+    ? (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.has(origin))
     : '*',
   credentials: true,
 }));
