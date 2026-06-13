@@ -252,18 +252,11 @@ module.exports = notificationsRouter;
 // ─────────────────────────────────────────────────────────────────────────────
 const paymentsRouter = express.Router();
 const stripeLib      = require('../lib/stripe');
+const { getOrCreateStripeCustomer } = require('../lib/stripeCustomer');
 
 paymentsRouter.post('/setup-intent', verifyAuth, async (req, res) => {
   try {
-    const { data: user } = await supabase
-      .from('users').select('stripe_customer_id').eq('id', req.userId).single();
-
-    let customerId = user?.stripe_customer_id;
-    if (!customerId) {
-      const c = await stripeLib.customers.create({ metadata: { user_id: req.userId } });
-      customerId = c.id;
-      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
-    }
+    const customerId = await getOrCreateStripeCustomer(req.userId);
 
     const intent = await stripeLib.setupIntents.create({ customer: customerId, payment_method_types: ['card'] });
     res.json({ client_secret: intent.client_secret });

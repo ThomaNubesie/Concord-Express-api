@@ -4,16 +4,11 @@ const supabase = require('../lib/supabase');
 const stripe   = require('../lib/stripe');
 const { verifyAuth } = require('../middleware/auth');
 const { sendReceiptEmail } = require('../lib/email');
+const { getOrCreateStripeCustomer } = require('../lib/stripeCustomer');
 
 router.post('/setup-intent', verifyAuth, async (req, res) => {
   try {
-    const { data: user } = await supabase.from('users').select('stripe_customer_id').eq('id', req.userId).single();
-    let customerId = user?.stripe_customer_id;
-    if (!customerId) {
-      const c = await stripe.customers.create({ metadata: { user_id: req.userId } });
-      customerId = c.id;
-      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
-    }
+    const customerId = await getOrCreateStripeCustomer(req.userId);
     const intent = await stripe.setupIntents.create({ customer: customerId, payment_method_types: ['card'] });
     res.json({ client_secret: intent.client_secret, customer_id: customerId });
   } catch (err) { console.error('[SetupIntent]', err.message); res.status(500).json({ error: err.message }); }
@@ -38,15 +33,7 @@ router.post('/attach-method', verifyAuth, async (req, res) => {
       return res.json({ success: true, waived: true });
     }
 
-    const { data: user } = await supabase
-      .from('users').select('stripe_customer_id').eq('id', req.userId).single();
-
-    let customerId = user?.stripe_customer_id;
-    if (!customerId) {
-      const c = await stripe.customers.create({ metadata: { user_id: req.userId } });
-      customerId = c.id;
-      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
-    }
+    const customerId = await getOrCreateStripeCustomer(req.userId);
 
     await stripe.paymentMethods.attach(payment_method_id, { customer: customerId });
     await stripe.customers.update(customerId, {
@@ -278,18 +265,7 @@ router.post('/package-charge', verifyAuth, async (req, res) => {
       return res.status(400).json({ error: 'payment_method_id, amount_cad, trip_id and package_type are required' });
     }
 
-    const { data: user } = await supabase
-      .from('users').select('stripe_customer_id, full_name, email').eq('id', req.userId).single();
-
-    let customerId = user?.stripe_customer_id;
-    if (!customerId) {
-      const cust = await stripe.customers.create({
-        email: user?.email, name: user?.full_name,
-        metadata: { user_id: req.userId },
-      });
-      customerId = cust.id;
-      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
-    }
+    const customerId = await getOrCreateStripeCustomer(req.userId);
 
     const intent = await stripe.paymentIntents.create({
       amount:   Math.round(amount_cad * 100),
@@ -430,18 +406,7 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
     const taxCents    = Math.round(subtotalCents * taxRate);
     const totalCents  = subtotalCents + taxCents;
 
-    const { data: user } = await supabase
-      .from('users').select('stripe_customer_id, full_name, email').eq('id', req.userId).single();
-
-    let customerId = user?.stripe_customer_id;
-    if (!customerId) {
-      const c = await stripe.customers.create({
-        email: user?.email, name: user?.full_name,
-        metadata: { user_id: req.userId },
-      });
-      customerId = c.id;
-      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
-    }
+    const customerId = await getOrCreateStripeCustomer(req.userId);
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount:           totalCents,
