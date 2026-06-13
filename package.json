@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "backfill-customers": "node scripts/backfill-stripe-customers.js"
   },
   "engines": {
     "node": ">=20.0.0"
