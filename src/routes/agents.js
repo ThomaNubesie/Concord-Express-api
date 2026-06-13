@@ -362,6 +362,58 @@ router.get('/admin/verifications', verifyAuth, requireAdmin, async (req, res) =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 6b. GET /admin/users  –  All users (passengers + drivers) for the Users tab
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/admin/users', verifyAuth, requireAdmin, async (req, res) => {
+  try {
+    const { data: usersData, error } = await supabase
+      .from('users')
+      .select('id, full_name, email, phone, role, country, is_verified, is_active, account_suspended, total_trips, total_trips_driver, rating_as_passenger, rating_as_driver, verification_fee_paid, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (error) {
+      console.error('[Admin] Users query error:', error.message);
+      return res.status(500).json({ error: 'Failed to fetch users' });
+    }
+
+    // Driver-profile extras, merged in JS (avoids depending on PostgREST embeds).
+    const { data: dpData } = await supabase
+      .from('driver_profiles')
+      .select('user_id, fee_paid, identity_verified, driver_status, bio, vehicle_make, vehicle_model');
+    const dpByUser = {};
+    (dpData || []).forEach((d) => { dpByUser[d.user_id] = d; });
+
+    const users = (usersData || []).map((u) => {
+      const dp = dpByUser[u.id];
+      const isDriver = u.role === 'driver' || u.role === 'both';
+      return {
+        id:                u.id,
+        name:              u.full_name,
+        email:             u.email,
+        phone:             u.phone,
+        role:              u.role,
+        country:           u.country,
+        description:       dp?.bio || null,
+        vehicle:           dp ? [dp.vehicle_make, dp.vehicle_model].filter(Boolean).join(' ') || null : null,
+        trips:             isDriver ? (u.total_trips_driver || 0) : (u.total_trips || 0),
+        rating:            isDriver ? u.rating_as_driver : u.rating_as_passenger,
+        verified:          !!u.is_verified,
+        fee_paid:          dp?.fee_paid ?? u.verification_fee_paid ?? null,
+        identity_verified: dp?.identity_verified ?? null,
+        driver_status:     dp?.driver_status ?? null,
+        status:            u.account_suspended ? 'suspended' : (u.is_active === false ? 'inactive' : 'active'),
+        joined:            u.created_at,
+      };
+    });
+
+    res.json({ users });
+  } catch (err) {
+    console.error('[Admin] GET /admin/users error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 7. GET /admin/approvals  –  Pending booking approvals
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/admin/approvals', verifyAuth, requireAdmin, async (req, res) => {
