@@ -18,6 +18,9 @@ const DRY    = process.argv.includes('--dry');
 const emails = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 
 const VERIFY_FEE = 399;   // C$3.99
+// Same province tax table as POST /api/payments/verification-fee.
+const PROVINCE_TAX = { ON:0.13, QC:0.14975, NB:0.15, NL:0.15, NS:0.15, PE:0.15, BC:0.12, MB:0.12, SK:0.11, AB:0.05, NT:0.05, NU:0.05, YT:0.05 };
+const provinceArg = (process.argv.find((a) => a.startsWith('--province=')) || '').split('=')[1];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 if (emails.length === 0) {
@@ -45,7 +48,7 @@ if (emails.length === 0) {
     if (!user.stripe_customer_id)   { console.warn(`skip   ${email} — no Stripe customer`); skipped++; continue; }
 
     const { data: dp } = await supabase
-      .from('driver_profiles').select('fee_paid').eq('user_id', user.id).single();
+      .from('driver_profiles').select('fee_paid, vehicle_province').eq('user_id', user.id).single();
     if (dp?.fee_paid) { console.warn(`skip   ${email} — driver already fee_paid`); skipped++; continue; }
 
     // Find a saved card on the customer.
@@ -56,8 +59,12 @@ if (emails.length === 0) {
     const isDriver  = user.role === 'driver' || user.role === 'both';
     const isFounder = foundingCount < 100;
     const driverFee = isFounder ? 1000 : 2000;             // C$10 founder / C$20 standard
-    const amount    = isDriver ? VERIFY_FEE + driverFee : VERIFY_FEE;
-    const label = `${email}  card ****${pm.card?.last4}  $${(amount / 100).toFixed(2)}${isDriver ? (isFounder ? ' (founder)' : ' (standard)') : ''}`;
+    const subtotal  = isDriver ? VERIFY_FEE + driverFee : VERIFY_FEE;
+    const province  = (provinceArg || dp?.vehicle_province || 'ON').toUpperCase();
+    const taxRate   = PROVINCE_TAX[province] ?? 0.13;
+    const tax       = Math.round(subtotal * taxRate);
+    const amount    = subtotal + tax;
+    const label = `${email}  card ****${pm.card?.last4}  $${(amount / 100).toFixed(2)} = $${(subtotal / 100).toFixed(2)} + ${(taxRate * 100).toFixed(3)}% ${province} tax${isDriver ? (isFounder ? ' (founder)' : ' (standard)') : ''}`;
 
     if (DRY) { console.log(`would charge  ${label}`); charged++; continue; }
 
@@ -71,7 +78,7 @@ if (emails.length === 0) {
         description:    isDriver
           ? `ConcordXpress verification + driver subscription (${isFounder ? 'founder' : 'standard'})`
           : 'ConcordXpress identity verification',
-        metadata: { user_id: user.id, role: user.role, source: 'admin-charge-fee' },
+        metadata: { user_id: user.id, role: user.role, source: 'admin-charge-fee', subtotal_cents: String(subtotal), tax_cents: String(tax), province },
       });
 
       if (pi.status !== 'succeeded') {
