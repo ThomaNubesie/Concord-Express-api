@@ -33,6 +33,7 @@ async function sendOtpEmail(to, otp) {
   // `error` ourselves, or a failed send looks like success.
   const { error } = await client.emails.send({
     from:    process.env.FROM_EMAIL || 'Concord Express <no-reply@loadq.ca>',
+    replyTo: process.env.REPLY_TO_EMAIL || 'support@concordexpress.ca',
     to,
     subject: 'Your ConcordXpress verification code',
     text:    `Your ConcordXpress verification code is ${otp}. It is valid for 10 minutes.`,
@@ -65,6 +66,7 @@ async function sendReceiptEmail(to, receipt) {
   if (!client) throw new Error('Email provider not configured (RESEND_API_KEY missing)');
   const { error } = await client.emails.send({
     from:    process.env.FROM_EMAIL || 'Concord Express <no-reply@loadq.ca>',
+    replyTo: process.env.REPLY_TO_EMAIL || 'support@concordexpress.ca',
     to,
     subject: `Your ConcordXpress receipt ${receipt.receiptId || ''}`.trim(),
     text:    `ConcordXpress receipt ${receipt.receiptId || ''} — Total ${receipt.total}. Thank you.`,
