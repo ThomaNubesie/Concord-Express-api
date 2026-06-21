@@ -32,7 +32,7 @@ async function sendOtpEmail(to, otp) {
   // unverified domain, test-sender recipient restriction). We must inspect
   // `error` ourselves, or a failed send looks like success.
   const { error } = await client.emails.send({
-    from:    process.env.FROM_EMAIL || 'no-reply@concordexpress.ca',
+    from:    process.env.FROM_EMAIL || 'Concord Express <no-reply@loadq.ca>',
     to,
     subject: 'Your ConcordXpress verification code',
     text:    `Your ConcordXpress verification code is ${otp}. It is valid for 10 minutes.`,
@@ -64,7 +64,7 @@ async function sendReceiptEmail(to, receipt) {
   const client = getClient();
   if (!client) throw new Error('Email provider not configured (RESEND_API_KEY missing)');
   const { error } = await client.emails.send({
-    from:    process.env.FROM_EMAIL || 'no-reply@concordexpress.ca',
+    from:    process.env.FROM_EMAIL || 'Concord Express <no-reply@loadq.ca>',
     to,
     subject: `Your ConcordXpress receipt ${receipt.receiptId || ''}`.trim(),
     text:    `ConcordXpress receipt ${receipt.receiptId || ''} — Total ${receipt.total}. Thank you.`,
