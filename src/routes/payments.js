@@ -28,9 +28,9 @@ router.post('/attach-method', verifyAuth, async (req, res) => {
   try {
     const { payment_method_id } = req.body;
     if (!payment_method_id || payment_method_id === 'waived') {
-      // Should have been caught by passengerIsFree check above, but handle gracefully
-      await supabase.from('users').update({ verification_fee_paid: true }).eq('id', req.userId);
-      return res.json({ success: true, waived: true });
+      // Attaching a card is NOT a payment. Never mark the fee paid here — doing
+      // so credited drivers who only saved a card but were never charged.
+      return res.status(400).json({ error: 'payment_method_id required' });
     }
 
     const customerId = await getOrCreateStripeCustomer(req.userId);
@@ -386,9 +386,11 @@ router.post('/verification-fee', verifyAuth, async (req, res) => {
     }
 
     if (!payment_method_id || payment_method_id === 'waived') {
-      // Should have been caught by passengerIsFree check above, but handle gracefully
-      await supabase.from('users').update({ verification_fee_paid: true }).eq('id', req.userId);
-      return res.json({ success: true, waived: true });
+      // The only free path is the founding-passenger case, which already
+      // returned above. Reaching here means we MUST charge but have no card —
+      // never silently mark the fee paid (that produced "paid but not charged"
+      // drivers). Force the client to supply/select a real payment method.
+      return res.status(400).json({ error: 'A payment method is required to complete verification.' });
     }
 
     const subtotalCents = role === 'passenger'
