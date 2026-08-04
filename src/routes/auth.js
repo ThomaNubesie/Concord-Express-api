@@ -63,7 +63,11 @@ router.post('/send-otp', async (req, res) => {
   try {
     const { phone, isNewUser } = req.body;
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
-    const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
+    // Normalize to E.164. Handle a leading country-code "1" (e.g. "15145551234")
+    // so it doesn't become "+115145551234" and fail account lookup.
+    const e164 = phone.startsWith('+')
+      ? phone.replace(/\s/g, '')
+      : (d => (d.length === 11 && d[0] === '1' ? '+' + d : '+1' + d))(phone.replace(/\D/g, ''));
 
     // App Review demo number — don't send a real SMS; reviewer enters DEMO_OTP.
     if (isDemoPhone(e164)) {
@@ -123,7 +127,11 @@ router.post('/verify-otp', async (req, res) => {
     const { phone, otp, fullName, email, isNewUser } = req.body;
     if (!phone || !otp) return res.status(400).json({ error: 'Phone and OTP are required' });
     // Use phone as-is if already in E.164 format, otherwise normalize
-    const e164 = phone.startsWith('+') ? phone.replace(/\s/g, '') : '+1' + phone.replace(/\D/g, '');
+    // Normalize to E.164. Handle a leading country-code "1" (e.g. "15145551234")
+    // so it doesn't become "+115145551234" and fail account lookup.
+    const e164 = phone.startsWith('+')
+      ? phone.replace(/\s/g, '')
+      : (d => (d.length === 11 && d[0] === '1' ? '+' + d : '+1' + d))(phone.replace(/\D/g, ''));
 
     // Master OTP bypass for local testing only — disabled in production so a
     // fixed code can never authenticate a real account (see lib/authPolicy).
