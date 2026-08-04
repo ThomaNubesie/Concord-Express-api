@@ -65,12 +65,10 @@ router.post('/', verifyAuth, async (req, res) => {
     const fareAmount  = trip.price_per_seat * seats;
     const bookingFee  = 2.99 * seats;
 
-    // For cash trips, block if no payment method (needed for booking fee)
-    if (!trip.cash_only && !payment_method_id) {
-      return res.status(400).json({ error: 'Payment method required for card trips' });
-    }
     const creditUsed  = Math.min(credit_to_apply, fareAmount + bookingFee);
     const totalAmount = Math.max(0, fareAmount + bookingFee - creditUsed);
+    // Approval trips authorize the card now and capture on driver approval.
+    const needsApproval = trip.booking_type === 'approval';
 
     // Get or create Stripe customer
     const { data: user } = await supabase
@@ -101,49 +99,51 @@ router.post('/', verifyAuth, async (req, res) => {
       .eq('user_id', trip.driver_id)
       .single();
 
-    // Create PaymentIntent — cash trips only charge booking fee, card trips charge full amount
-    let paymentIntent;
-    if (trip.cash_only) {
-      // Cash trip: charge C$2.99/seat booking fee, no escrow needed
+    // Payment. Two flows share one endpoint:
+    //  • Mobile passes a saved payment_method_id → confirm the charge server-side now.
+    //  • Web (Stripe Elements) passes none → create an UNCONFIRMED card PaymentIntent
+    //    and return its client_secret so the browser confirms the card itself.
+    // Cash trips charge only the booking fee; card trips charge the full amount.
+    const chargeCents  = trip.cash_only ? Math.round(bookingFee * 100) : Math.round(totalAmount * 100);
+    const captureMode  = 'automatic'; // debit the card directly — no escrow / hold
+    const paymentMeta  = { trip_id, passenger_id: req.userId, driver_id: trip.driver_id, ...(trip.cash_only ? { cash_only: 'true' } : {}) };
+    const transferData = (!trip.cash_only && driverProfile?.stripe_account_id)
+      ? { destination: driverProfile.stripe_account_id, amount: Math.round(fareAmount * 0.9 * 100) }
+      : undefined;
+
+    let paymentIntent, clientSecret = null;
+    if (payment_method_id) {
       paymentIntent = await stripe.paymentIntents.create({
-        amount:         Math.round(bookingFee * 100),
+        amount:         chargeCents,
         currency:       'cad',
         customer:       customerId,
         payment_method: payment_method_id,
         confirm:        true,
-        capture_method: 'automatic',
-        description:    'Cash trip booking fee',
-        metadata: { trip_id, passenger_id: req.userId, driver_id: trip.driver_id, cash_only: 'true' },
-        return_url: 'concordxpress://payment-complete',
+        capture_method: captureMode,
+        transfer_data:  transferData,
+        metadata:       paymentMeta,
+        return_url:     'concordxpress://payment-complete',
       });
-      if (!['succeeded','processing'].includes(paymentIntent.status)) {
-        return res.status(400).json({ error: 'Booking fee payment failed. Please check your card.' });
-      }
-    } else {
-      // Card trip: full escrow flow
-      paymentIntent = await stripe.paymentIntents.create({
-        amount:         Math.round(totalAmount * 100),
-        currency:       'cad',
-        customer:       customerId,
-        payment_method: payment_method_id,
-        confirm:        true,
-        capture_method: 'manual',
-        transfer_data:  driverProfile?.stripe_account_id ? {
-          destination: driverProfile.stripe_account_id,
-          amount:      Math.round(fareAmount * seats * 0.9 * 100),
-        } : undefined,
-        metadata: { trip_id, passenger_id: req.userId, driver_id: trip.driver_id },
-        return_url: 'concordxpress://payment-complete',
-      });
-      if (paymentIntent.status !== 'requires_capture') {
+      const ok = ['succeeded', 'processing'];
+      if (!ok.includes(paymentIntent.status)) {
         return res.status(400).json({ error: 'Payment failed. Please check your payment method.' });
       }
+    } else {
+      // Browser Elements flow — card collected + confirmed client-side.
+      paymentIntent = await stripe.paymentIntents.create({
+        amount:               chargeCents,
+        currency:             'cad',
+        customer:             customerId,
+        payment_method_types: ['card'],
+        capture_method:       captureMode,
+        transfer_data:        transferData,
+        metadata:             paymentMeta,
+      });
+      clientSecret = paymentIntent.client_secret;
     }
 
-    // Determine approval flow
-    const needsApproval = trip.booking_type === 'approval';
-    const bookingStatus = needsApproval ? 'pending'    : 'confirmed';
-    const approvalStatus= needsApproval ? 'pending'    : 'approved';
+    const bookingStatus  = needsApproval ? 'pending' : 'confirmed';
+    const approvalStatus = needsApproval ? 'pending' : 'approved';
 
     // For approval trips, hold the PaymentIntent but don't capture yet
     // (already created as requires_capture for card, automatic for cash)
@@ -250,7 +250,7 @@ router.post('/', verifyAuth, async (req, res) => {
       trip.to_city
     );
 
-    res.status(201).json({ booking });
+    res.status(201).json({ booking, bookingId: booking.id, clientSecret });
   } catch (err) {
     console.error('[Bookings] create error:', err);
     res.status(500).json({ error: err.message || 'Failed to create booking' });
